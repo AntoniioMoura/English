@@ -168,7 +168,10 @@ Especificação em [especificacao_listening_videos.md](especificacao_listening_v
   navegador não toca (MKV, HEVC, áudio AC3…) ganha uma cópia MP4 H.264/AAC; o original nunca é alterado.
 - **Ritmo:** o vídeo corre com a legenda completa e para só numa frase-exercício a cada ~15 s, ~30 s (padrão) ou
   ~1 min — ou em todas as frases. Em cada janela entra a frase mais adequada (tamanho médio, palavras de verdade).
-- **Exercício:** lacunas por dificuldade (Iniciante 10–15%, Fácil 25–30%, Médio 40–45%, Difícil 60%), sorteadas na
+- **Exercício:** cada lacuna aceita exatamente o número de letras da palavra e é conferida a cada tecla (verde certo,
+  vermelho errado); palavra certa trava e o cursor pula para a próxima; palavra completa e errada conta um erro.
+  *Revelar palavra em foco* (Ctrl+Enter) registra dificuldade. Com tudo preenchido aparece *Continuar*.
+- **Lacunas:** lacunas por dificuldade (Iniciante 10–15%, Fácil 25–30%, Médio 40–45%, Difícil 60%), sorteadas na
   primeira vez com peso maior para palavras que você já errou e **fixas** depois disso (recomeçar repete as mesmas);
   cada dificuldade tem as suas. *Mostrar resposta* revela a frase inteira e toca de novo (conta como ajuda).
 - **Fiel ao áudio:** a legenda é comparada palavra a palavra com o que o Whisper ouve. Só viram lacuna palavras

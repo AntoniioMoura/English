@@ -4,6 +4,20 @@ import { formatTime, ItemResult, listeningApi, pct, Session, SessionItem } from 
 
 const PREROLL = 0.15; // começa um pouco antes para não cortar a primeira sílaba
 
+// Conferência em tempo real: ignora só maiúsculas e o tipo de apóstrofo.
+const fold = (value: string) => value.toLowerCase().replace(/[’‘`´]/g, "'");
+type Live = "empty" | "ok" | "bad" | "done";
+
+function liveState(expected: string, typed: string): Live {
+  if (!typed) return "empty";
+  const want = fold(expected);
+  const got = fold(typed);
+  if (!want.startsWith(got)) return "bad";
+  return got.length === want.length ? "done" : "ok";
+}
+
+const blankKey = (itemId: number, k: number) => `${itemId}:${k}`;
+
 // De onde o vídeo corre até a frase `i`: do fim da frase-exercício anterior (com a legenda completa no meio).
 function runStart(session: Session, i: number): number {
   const it = session.items[i];
@@ -30,6 +44,9 @@ export function ListeningPlayer() {
   const inputs = useRef<(HTMLInputElement | null)[]>([]);
   const nextButton = useRef<HTMLButtonElement>(null);
   const focusedBlank = useRef(0);
+  // Lacunas acertadas aqui que o servidor ainda não confirmou (a digitação não espera a rede).
+  const [solved, setSolved] = useState<Set<string>>(new Set());
+  const submissions = useRef<Promise<unknown>>(Promise.resolve());
 
   useEffect(() => {
     listeningApi
@@ -97,8 +114,15 @@ export function ListeningPlayer() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [watching, item?.id]);
 
-  function focusFirstOpen(it: SessionItem) {
-    const open = it.blanks.find((b) => b.state === "hidden" || b.state === "wrong");
+  const isOpen = (it: SessionItem, k: number, done: Set<string> = solved) =>
+    ["hidden", "wrong"].includes(it.blanks[k].state) && !done.has(blankKey(it.id, k));
+
+  useEffect(() => {
+    if (item && item.status !== "pending") window.setTimeout(() => nextButton.current?.focus(), 30);
+  }, [item?.status, item?.id]);
+
+  function focusFirstOpen(it: SessionItem, done: Set<string> = solved) {
+    const open = it.blanks.find((b) => isOpen(it, b.blank, done));
     if (open) {
       const el = inputs.current[open.blank];
       el?.focus();
@@ -163,6 +187,7 @@ export function ListeningPlayer() {
     setBusy(true);
     setError(null);
     try {
+      await submissions.current; // acertos digitados agora entram antes de revelar/pular
       const result = await action();
       updateItem(result.item, result.session);
       setAnswers((prev) => ({
@@ -179,12 +204,19 @@ export function ListeningPlayer() {
     }
   }
 
-  const check = () => {
-    if (!item || !session || item.status !== "pending") return;
-    const typed = answers[item.id] ?? [];
-    if (!typed.some((t, k) => t.trim() && ["hidden", "wrong"].includes(item.blanks[k].state))) return;
-    run(() => listeningApi.check(session.id, item.id, typed.map((t) => t || null)));
-  };
+  // Envia uma lacuna completa ao servidor (que valida e registra). Em fila, para não embaralhar respostas.
+  function submit(it: SessionItem, k: number, typed: string) {
+    if (!session) return;
+    const sessionId = session.id;
+    submissions.current = submissions.current.then(async () => {
+      try {
+        const result = await listeningApi.check(sessionId, it.id, it.blanks.map((_, n) => (n === k ? typed : null)));
+        updateItem(result.item, result.session);
+      } catch (e) {
+        setError((e as Error).message);
+      }
+    });
+  }
 
   const reveal = (blank: number | null) => {
     if (!item || !session || item.status !== "pending") return;
@@ -209,31 +241,34 @@ export function ListeningPlayer() {
 
   // ---------- teclado ----------
 
-  // Lacunas não têm espaço: digitar/colar "word word" distribui as palavras pelas lacunas seguintes.
-  function onBlankChange(it: SessionItem, k: number, value: string) {
-    const open = it.blanks.filter((b) => b.blank >= k && ["hidden", "wrong"].includes(b.state)).map((b) => b.blank);
-    const pieces = value.split(/\s+/);
+  // Cada tecla é conferida na hora: verde enquanto está certo, vermelho no primeiro erro.
+  // Palavra completa e certa → trava e o cursor vai para a próxima lacuna.
+  // Palavra completa e errada → conta um erro e o cursor fica (apague e tente de novo).
+  function onBlankChange(it: SessionItem, k: number, raw: string) {
+    const expected = it.blanks[k].expected;
+    const value = raw.replace(/\s+/g, "").slice(0, expected.length);
     setAnswers((prev) => {
       const list = [...(prev[it.id] ?? it.blanks.map(() => ""))];
-      if (pieces.length === 1) {
-        list[k] = value;
-      } else {
-        const words = pieces.filter(Boolean);
-        open.forEach((blank, n) => n < words.length && (list[blank] = words[n]));
-      }
+      list[k] = value;
       return { ...prev, [it.id]: list };
     });
-    if (pieces.length > 1) {
-      const filled = pieces.filter(Boolean).length;
-      const target = open[Math.min(value.endsWith(" ") || !pieces[0] ? filled : filled - 1, open.length - 1)];
-      if (target !== undefined && target !== k) window.setTimeout(() => inputs.current[target]?.focus(), 0);
+    const live = liveState(expected, value);
+    if (live === "done") {
+      const done = new Set(solved).add(blankKey(it.id, k));
+      setSolved(done);
+      submit(it, k, value);
+      const next = it.blanks.find((b) => b.blank > k && isOpen(it, b.blank, done)) ?? it.blanks.find((b) => isOpen(it, b.blank, done));
+      // Foco já nesta tecla (sem esperar a nova renderização): nenhuma letra digitada rápido se perde.
+      if (next) inputs.current[next.blank]?.focus();
+    } else if (live === "bad" && value.length === expected.length) {
+      submit(it, k, value);
     }
   }
 
   function onBlankKey(e: KeyboardEvent<HTMLInputElement>, k: number) {
     const value = (e.target as HTMLInputElement).value;
-    if (e.key === " " && !e.ctrlKey && !value.trim()) {
-      e.preventDefault(); // espaço numa lacuna vazia não faz nada
+    if (e.key === " " && !e.ctrlKey) {
+      e.preventDefault(); // palavras não têm espaço
     } else if (e.key === "Backspace" && !value) {
       e.preventDefault();
       moveFocus(k, -1);
@@ -243,7 +278,7 @@ export function ListeningPlayer() {
   function moveFocus(k: number, dir: 1 | -1) {
     if (!item) return;
     for (let n = k + dir; n >= 0 && n < item.blanks.length; n += dir) {
-      if (["hidden", "wrong"].includes(item.blanks[n].state)) {
+      if (isOpen(item, n)) {
         inputs.current[n]?.focus();
         inputs.current[n]?.select();
         return;
@@ -265,8 +300,7 @@ export function ListeningPlayer() {
         if (target.tagName === "BUTTON" && target !== nextButton.current) return;
         e.preventDefault();
         if (watching) playSegment(item); // pula o contexto e vai direto à frase
-        else if (item.status === "pending") check();
-        else nextPending();
+        else if (item.status !== "pending") nextPending();
       } else if (e.key === "PageDown") {
         e.preventDefault();
         goTo(index + 1);
@@ -416,22 +450,26 @@ export function ListeningPlayer() {
                 );
               }
               const blank = item.blanks[part.blank];
-              if (blank.state === "correct" || blank.state === "revealed" || part.text !== null) {
+              const k = part.blank;
+              const solvedHere = solved.has(blankKey(item.id, k));
+              if (blank.state === "correct" || blank.state === "revealed" || solvedHere || part.text !== null) {
+                const state = blank.state === "revealed" ? "revealed" : "correct";
                 return (
-                  <span key={n} className={`word word-${blank.state}`} title={blank.state === "revealed" ? "Revelada (com ajuda)" : undefined}>
-                    {part.text ?? blank.answer}
+                  <span key={n} className={`word word-${state}`} title={state === "revealed" ? "Revelada (com ajuda)" : undefined}>
+                    {part.text ?? blank.expected}
                   </span>
                 );
               }
-              const k = part.blank;
+              const value = answers[item.id]?.[k] ?? "";
               return (
                 <input
                   key={`${item.id}-${k}`}
                   ref={(el) => (inputs.current[k] = el)}
-                  className={`blank-input ${blank.state === "wrong" ? "blank-wrong" : ""}`}
-                  style={{ width: `${Math.max(blank.length, 2) + 0.6}ch` }}
-                  value={answers[item.id]?.[k] ?? ""}
-                  placeholder={"•".repeat(blank.length)}
+                  className={`blank-input blank-${liveState(blank.expected, value)}`}
+                  style={{ width: `${Math.max(blank.expected.length, 2) + 0.6}ch` }}
+                  value={value}
+                  maxLength={blank.expected.length}
+                  placeholder={"•".repeat(blank.expected.length)}
                   onChange={(e) => onBlankChange(item, k, e.target.value)}
                   onFocus={() => (focusedBlank.current = k)}
                   onKeyDown={(e) => onBlankKey(e, k)}
@@ -470,7 +508,6 @@ export function ListeningPlayer() {
                     </div>
                   )}
                 </div>
-                <span className="muted tiny">Enter confere · Espaço vai para a próxima lacuna</span>
                 <button
                   className="btn btn-ghost"
                   onClick={showAnswer}
@@ -478,9 +515,6 @@ export function ListeningPlayer() {
                   title="Mostra a frase inteira e toca de novo (conta como ajuda)"
                 >
                   Mostrar resposta
-                </button>
-                <button className="btn btn-primary" onClick={check} disabled={busy}>
-                  Conferir
                 </button>
               </>
             ) : (
@@ -499,7 +533,7 @@ export function ListeningPlayer() {
                 )}
                 {!finished && (
                   <button ref={nextButton} className="btn btn-primary" onClick={nextPending}>
-                    Próxima →
+                    Continuar
                   </button>
                 )}
               </>
@@ -527,10 +561,6 @@ export function ListeningPlayer() {
         </section>
       )}
 
-      <p className="muted tiny shortcuts">
-        Atalhos: Enter conferir/próxima · Ctrl+Espaço repetir a frase · Ctrl+Enter revelar a palavra em foco ·
-        PageUp/PageDown navegar{item ? ` · repetições desta frase: ${item.replays}` : ""}
-      </p>
     </div>
   );
 }

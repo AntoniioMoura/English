@@ -93,6 +93,7 @@ export interface Blank {
   errors: number;
   last_typed: string | null;
   answer: string | null;
+  expected: string; // conferência letra a letra no player
 }
 
 export interface SessionItem {

@@ -451,6 +451,9 @@ a { color: inherit; text-decoration: none; }
 }
 .blank-input::placeholder { color: #94a3b8; letter-spacing: 0.08em; }
 .blank-input:focus { outline: none; border-bottom-style: solid; border-bottom-color: var(--primary); background: var(--primary-soft); }
+.blank-ok { color: var(--ok); }
+.blank-done { color: var(--ok); border-bottom: 2px solid #86efac; }
+.blank-bad, .blank-bad:focus { color: var(--error); background: var(--error-soft); border-bottom: 2px solid var(--error); }
 .blank-wrong { border-bottom: 2px solid var(--error); background: var(--error-soft); color: var(--error); }
 .word-correct { color: var(--ok); border-bottom: 2px solid #86efac; }
 .word-revealed { color: var(--improve); border-bottom: 2px solid #fcd34d; }

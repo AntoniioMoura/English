@@ -397,6 +397,8 @@ def _blank_states(item: dict, attempts: list[dict]) -> list[dict]:
             "errors": sum(1 for a in mine if not a["is_correct"] and not a["used_help"]),
             "last_typed": typed[-1] if typed else None,
             "answer": word_list[wi] if state in ("correct", "revealed") or item["status"] == "skipped" else None,
+            # o player confere letra a letra em tempo real; o servidor continua validando e registrando
+            "expected": word_list[wi],
         })
     return states
 
