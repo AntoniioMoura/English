@@ -4,6 +4,7 @@ import { formatTime, ItemResult, listeningApi, pct, Session, SessionItem } from 
 import { setSoundEnabled, soundEnabled, sounds } from "../../sounds";
 
 const PREROLL = 0.15; // começa um pouco antes para não cortar a primeira sílaba
+const TRANSLATION_KEY = "listening.translation";
 
 // Conferência em tempo real: ignora só maiúsculas e o tipo de apóstrofo.
 const fold = (value: string) => value.toLowerCase().replace(/[’‘`´]/g, "'");
@@ -36,6 +37,24 @@ export function ListeningPlayer() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [soundOn, setSoundOn] = useState(soundEnabled);
+  const [showTranslation, setShowTranslation] = useState(() => {
+    try {
+      return localStorage.getItem(TRANSLATION_KEY) === "on";
+    } catch {
+      return false;
+    }
+  });
+
+  function toggleTranslation() {
+    setShowTranslation((on) => {
+      try {
+        localStorage.setItem(TRANSLATION_KEY, on ? "off" : "on"); // lembra a escolha entre sessões
+      } catch {
+        /* sem armazenamento: vale só nesta visita */
+      }
+      return !on;
+    });
+  }
   // Frase concluída agora (anima só na hora; revisitar uma frase mostra o resumo sem festa).
   const [celebrating, setCelebrating] = useState<number | null>(null);
   const lastStatus = useRef<Record<number, SessionItem["status"]>>({});
@@ -356,6 +375,7 @@ export function ListeningPlayer() {
   }
 
   const finished = session.status !== "active";
+  const translationOn = showTranslation && session.video.has_translation;
   const contextLine = watching
     ? [...session.context].reverse().find((c) => c.text && time >= c.start - 0.05 && time <= c.end + 0.4)
     : undefined;
@@ -441,6 +461,20 @@ export function ListeningPlayer() {
           >
             {soundOn ? "🔊" : "🔇"}
           </IconButton>
+          <IconButton
+            label={
+              !session.video.has_translation
+                ? "Este vídeo não tem legenda em português (coloque um .pt-BR.srt ao lado do vídeo)"
+                : showTranslation
+                  ? "Ocultar tradução"
+                  : "Mostrar tradução"
+            }
+            onClick={toggleTranslation}
+            disabled={!session.video.has_translation}
+            active={showTranslation && session.video.has_translation}
+          >
+            PT
+          </IconButton>
         </div>
       </div>
       <div className="player-track">
@@ -456,6 +490,7 @@ export function ListeningPlayer() {
 
       {item && watching && (
         <section className="sentence-area">
+          {translationOn && <p className="translation-above">{contextLine?.translation_pt ?? " "}</p>}
           <p className="sentence sentence-context" aria-live="polite">
             {contextLine?.text ?? "\u00a0"}
           </p>
@@ -464,6 +499,7 @@ export function ListeningPlayer() {
 
       {item && !watching && (
         <section className={`sentence-area ${item.status !== "pending" ? "sentence-done" : ""}`}>
+          {translationOn && <p className="translation-above">{item.translation_pt ?? " "}</p>}
           <p className={`sentence ${celebrating === item.id && isPerfect(item) ? "sentence-celebrate" : ""}`} aria-live="polite">
             {item.parts.map((part, n) => {
               if (part.blank === null) {
