@@ -1,6 +1,7 @@
 import { KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { formatTime, ItemResult, listeningApi, pct, Session, SessionItem } from "../../listeningApi";
+import { setSoundEnabled, soundEnabled, sounds } from "../../sounds";
 
 const PREROLL = 0.15; // começa um pouco antes para não cortar a primeira sílaba
 
@@ -34,7 +35,10 @@ export function ListeningPlayer() {
   const [answers, setAnswers] = useState<Record<number, string[]>>({});
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [showTranslation, setShowTranslation] = useState(false);
+  const [soundOn, setSoundOn] = useState(soundEnabled);
+  // Frase concluída agora (anima só na hora; revisitar uma frase mostra o resumo sem festa).
+  const [celebrating, setCelebrating] = useState<number | null>(null);
+  const lastStatus = useRef<Record<number, SessionItem["status"]>>({});
   const [needsGesture, setNeedsGesture] = useState(false);
   const [playing, setPlaying] = useState(false);
   const [time, setTime] = useState(0);
@@ -54,6 +58,7 @@ export function ListeningPlayer() {
       .then((s) => {
         setSession(s);
         setIndex(s.current_index);
+        lastStatus.current = Object.fromEntries(s.items.map((i) => [i.id, i.status]));
       })
       .catch((e) => setError(e.message));
   }, [sessionId]);
@@ -98,8 +103,14 @@ export function ListeningPlayer() {
   // Ao trocar de frase: o vídeo corre (com a legenda completa) desde a frase anterior e para no fim desta.
   useEffect(() => {
     if (!item || !session) return;
-    setTime(runStart(session, index));
-    playUntil(item, runStart(session, index));
+    setCelebrating(null);
+    if (item.status === "pending") {
+      setTime(runStart(session, index));
+      playUntil(item, runStart(session, index));
+    } else {
+      setTime(item.start);
+      playSegment(item); // revisitando uma frase concluída: só ela
+    }
     setSkipMenu(false);
     setAnswers((prev) =>
       prev[item.id] ? prev : { ...prev, [item.id]: item.blanks.map((b) => (b.state === "wrong" ? b.last_typed ?? "" : "")) },
@@ -120,6 +131,18 @@ export function ListeningPlayer() {
   useEffect(() => {
     if (item && item.status !== "pending") window.setTimeout(() => nextButton.current?.focus(), 30);
   }, [item?.status, item?.id]);
+
+  // A frase acabou de ser concluída (pendente → feita): som e animação de recompensa.
+  useEffect(() => {
+    if (!item) return;
+    const before = lastStatus.current[item.id];
+    lastStatus.current[item.id] = item.status;
+    if (before === "pending" && item.status === "done") {
+      const perfect = isPerfect(item);
+      sounds.sentence(perfect);
+      setCelebrating(item.id);
+    }
+  }, [item?.status, item?.id, item]);
 
   function focusFirstOpen(it: SessionItem, done: Set<string> = solved) {
     const open = it.blanks.find((b) => isOpen(it, b.blank, done));
@@ -247,13 +270,16 @@ export function ListeningPlayer() {
   function onBlankChange(it: SessionItem, k: number, raw: string) {
     const expected = it.blanks[k].expected;
     const value = raw.replace(/\s+/g, "").slice(0, expected.length);
+    const typedMore = value.length > (answers[it.id]?.[k] ?? "").length;
     setAnswers((prev) => {
       const list = [...(prev[it.id] ?? it.blanks.map(() => ""))];
       list[k] = value;
       return { ...prev, [it.id]: list };
     });
     const live = liveState(expected, value);
+    if (typedMore && live !== "done") (live === "bad" ? sounds.wrongKey : sounds.key)();
     if (live === "done") {
+      sounds.word();
       const done = new Set(solved).add(blankKey(it.id, k));
       setSolved(done);
       submit(it, k, value);
@@ -299,11 +325,10 @@ export function ListeningPlayer() {
         const target = e.target as HTMLElement;
         if (target.tagName === "BUTTON" && target !== nextButton.current) return;
         e.preventDefault();
-        if (watching) playSegment(item); // pula o contexto e vai direto à frase
-        else if (item.status !== "pending") nextPending();
+        if (!watching && item.status !== "pending") nextPending();
       } else if (e.key === "PageDown") {
         e.preventDefault();
-        goTo(index + 1);
+        if (index < frontier) goTo(index + 1);
       } else if (e.key === "PageUp") {
         e.preventDefault();
         goTo(index - 1);
@@ -312,6 +337,14 @@ export function ListeningPlayer() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   });
+
+  // "›" só navega entre frases já concluídas (até a última feita); avançar para a próxima é o "Continuar".
+  const frontier = useMemo(() => {
+    if (!session) return -1;
+    let last = -1;
+    session.items.forEach((i, n) => i.status !== "pending" && (last = n));
+    return last;
+  }, [session]);
 
   const progress = useMemo(() => {
     if (!session) return 0;
@@ -323,7 +356,6 @@ export function ListeningPlayer() {
   }
 
   const finished = session.status !== "active";
-  const translationAvailable = session.video.has_translation && !!item?.translation_pt;
   const contextLine = watching
     ? [...session.context].reverse().find((c) => c.text && time >= c.start - 0.05 && time <= c.end + 0.4)
     : undefined;
@@ -386,7 +418,11 @@ export function ListeningPlayer() {
           <IconButton label="Repetir a frase (Ctrl+Espaço)" onClick={replay}>
             ↻
           </IconButton>
-          <IconButton label="Próxima frase (PageDown)" onClick={() => goTo(index + 1)} disabled={index >= session.items.length - 1}>
+          <IconButton
+            label="Próxima frase concluída (PageDown)"
+            onClick={() => goTo(index + 1)}
+            disabled={index >= frontier}
+          >
             ›
           </IconButton>
           <IconButton
@@ -397,12 +433,13 @@ export function ListeningPlayer() {
             💡
           </IconButton>
           <IconButton
-            label={showTranslation ? "Ocultar tradução" : "Mostrar tradução"}
-            onClick={() => setShowTranslation((v) => !v)}
-            disabled={!session.video.has_translation}
-            active={showTranslation}
+            label={soundOn ? "Silenciar sons de digitação" : "Ativar sons de digitação"}
+            onClick={() => {
+              setSoundEnabled(!soundOn);
+              setSoundOn(!soundOn);
+            }}
           >
-            PT
+            {soundOn ? "🔊" : "🔇"}
           </IconButton>
         </div>
       </div>
@@ -422,23 +459,13 @@ export function ListeningPlayer() {
           <p className="sentence sentence-context" aria-live="polite">
             {contextLine?.text ?? "\u00a0"}
           </p>
-          {showTranslation && contextLine?.translation_pt && <p className="translation">{contextLine.translation_pt}</p>}
-          <div className="sentence-actions">
-            <span className="muted small">
-              {playing
-                ? `Assistindo… a próxima frase para completar chega em ${Math.max(Math.ceil(item.start - time), 1)} s.`
-                : "Pausado."}
-            </span>
-            <button className="btn btn-ghost" onClick={() => playSegment(item)}>
-              Ir direto para a frase →
-            </button>
-          </div>
         </section>
       )}
 
       {item && !watching && (
         <section className={`sentence-area ${item.status !== "pending" ? "sentence-done" : ""}`}>
-          <p className="sentence" aria-live="polite">
+          {item.status === "done" && <Reward item={item} streak={streakAt(session, index)} animate={celebrating === item.id} />}
+          <p className={`sentence ${celebrating === item.id && isPerfect(item) ? "sentence-celebrate" : ""}`} aria-live="polite">
             {item.parts.map((part, n) => {
               if (part.blank === null) {
                 return part.unheard ? (
@@ -455,7 +482,7 @@ export function ListeningPlayer() {
               if (blank.state === "correct" || blank.state === "revealed" || solvedHere || part.text !== null) {
                 const state = blank.state === "revealed" ? "revealed" : "correct";
                 return (
-                  <span key={n} className={`word word-${state}`} title={state === "revealed" ? "Revelada (com ajuda)" : undefined}>
+                  <span key={n} className={`word word-${state}`} style={{ "--i": k } as React.CSSProperties} title={state === "revealed" ? "Revelada (com ajuda)" : undefined}>
                     {part.text ?? blank.expected}
                   </span>
                 );
@@ -485,9 +512,6 @@ export function ListeningPlayer() {
           </p>
           {item.parts.some((p) => p.unheard) && (
             <p className="muted tiny center-text">Palavras riscadas estão na legenda, mas não são ditas no áudio.</p>
-          )}
-          {showTranslation && (
-            <p className="translation">{translationAvailable ? item.translation_pt : "Sem tradução para esta fala."}</p>
           )}
 
           <div className="sentence-actions">
@@ -519,12 +543,12 @@ export function ListeningPlayer() {
               </>
             ) : (
               <>
-                <span className={item.status === "done" && summarize(item).startsWith("Perfeito") ? "ok-text small" : "muted small"}>
+                <span className="muted small">
                   {item.status === "skipped"
                     ? item.flagged
                       ? "Fala sinalizada: corrija-a em “Corrigir legendas”."
                       : "Fala pulada."
-                    : summarize(item)}
+                    : ""}
                 </span>
                 {item.flagged && (
                   <Link className="link small" to={`/listening/video/${session.video.id}/edit#segment-${item.segment_id}`}>
@@ -565,11 +589,57 @@ export function ListeningPlayer() {
   );
 }
 
-function summarize(item: SessionItem): string {
+function isPerfect(item: SessionItem): boolean {
+  return item.status === "done" && item.blanks.every((b) => b.state === "correct" && b.errors === 0);
+}
+
+// Frases perfeitas seguidas até a frase `index` (inclusive).
+function streakAt(session: Session, index: number): number {
+  let streak = 0;
+  for (let i = index; i >= 0 && isPerfect(session.items[i]); i--) streak++;
+  return streak;
+}
+
+const CONFETTI_COLORS = ["#22c55e", "#4f46e5", "#f59e0b", "#ec4899", "#06b6d4", "#a855f7"];
+
+function Reward({ item, streak, animate }: { item: SessionItem; streak: number; animate: boolean }) {
+  const perfect = isPerfect(item);
   const helped = item.blanks.filter((b) => b.state === "revealed").length;
   const errors = item.blanks.reduce((sum, b) => sum + b.errors, 0);
-  if (!helped && !errors) return "Perfeito! ✓";
-  return [errors && `${errors} erro(s)`, helped && `${helped} com ajuda`].filter(Boolean).join(" · ");
+  const confetti = useMemo(
+    () =>
+      Array.from({ length: 22 }, (_, n) => {
+        const angle = (n / 22) * Math.PI * 2 + Math.random() * 0.4;
+        const distance = 60 + Math.random() * 70;
+        return {
+          "--x": `${Math.cos(angle) * distance * 1.6}px`,
+          "--y": `${Math.sin(angle) * distance - 30}px`,
+          "--r": `${Math.random() * 540 - 270}deg`,
+          background: CONFETTI_COLORS[n % CONFETTI_COLORS.length],
+          animationDelay: `${Math.random() * 0.08}s`,
+        } as React.CSSProperties;
+      }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [item.id, animate],
+  );
+
+  if (perfect) {
+    return (
+      <div className={`reward reward-perfect ${animate ? "reward-animate" : ""}`} role="status">
+        {animate && confetti.map((style, n) => <span key={n} className="confetti" style={style} />)}
+        <span className="reward-title">Perfeito!</span>
+        {streak > 1 && <span className="reward-streak">🔥 {streak} seguidas</span>}
+      </div>
+    );
+  }
+  return (
+    <div className={`reward reward-ok ${animate ? "reward-animate" : ""}`} role="status">
+      <span className="reward-title">Frase concluída</span>
+      <span className="reward-detail">
+        {[errors && `${errors} erro${errors > 1 ? "s" : ""}`, helped && `${helped} com ajuda`].filter(Boolean).join(" · ")}
+      </span>
+    </div>
+  );
 }
 
 function IconButton(props: { label: string; onClick: () => void; disabled?: boolean; active?: boolean; children: React.ReactNode }) {
