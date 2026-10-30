@@ -3,15 +3,15 @@
 import mimetypes
 import sqlite3
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
+from ..llm.client import LLMClient, LLMError
 from ..services import listening_downloads as downloads
 from ..services import listening_media as media
-from ..services import listening_translation as translation
 from ..services import listening_service as service
-from .deps import get_conn
+from .deps import get_conn, get_llm
 
 router = APIRouter(prefix="/api/listening")
 
@@ -101,14 +101,6 @@ def prepare(video_id: int, body: PrepareIn | None = None, conn: sqlite3.Connecti
     return service.prepare_video(conn, worker, video_id, force=bool(body and body.force))
 
 
-@router.post("/videos/{video_id}/translate")
-def translate(video_id: int, conn: sqlite3.Connection = Depends(get_conn),
-              worker: media.ListeningWorker = Depends(get_worker)):
-    """Gera a tradução das falas com o Ollama local (vídeos sem legenda em português)."""
-    translation.start(conn, worker, video_id)
-    return service.video_detail(conn, worker, video_id)
-
-
 @router.get("/videos/{video_id}/stream")
 def stream(video_id: int, request: Request, conn: sqlite3.Connection = Depends(get_conn)):
     path = service.media_file(conn, request.app.state.videos_dir, video_id)
@@ -159,6 +151,15 @@ def reveal(session_id: int, item_id: int, body: RevealIn, conn: sqlite3.Connecti
 @router.post("/sessions/{session_id}/items/{item_id}/replay")
 def replay(session_id: int, item_id: int, conn: sqlite3.Connection = Depends(get_conn)):
     return service.replay(conn, session_id, item_id)
+
+
+@router.post("/sessions/{session_id}/items/{item_id}/translate")
+def translate(session_id: int, item_id: int, conn: sqlite3.Connection = Depends(get_conn),
+              llm: LLMClient = Depends(get_llm)):
+    try:
+        return service.translate(conn, llm, session_id, item_id)
+    except LLMError as exc:
+        raise HTTPException(status_code=503, detail={"code": "llm_error", "message": str(exc)}) from exc
 
 
 @router.post("/sessions/{session_id}/items/{item_id}/skip")

@@ -180,9 +180,9 @@ Especificação em [especificacao_listening_videos.md](especificacao_listening_v
   minúscula no vídeo, ou maiúsculas misturadas: Lilies, BLINKs) nunca viram lacuna nem entram no histórico de erros. Comparação ignora só
   maiúsculas, apóstrofo tipográfico e pontuação das pontas (`dont` ≠ `don't`). Erro conta ao conferir, não por tecla;
   revelar registra ajuda (não é acerto); repetições são contadas sem punir.
-- **Tradução:** o botão PT mostra a tradução em letra pequena acima da frase. Vem da legenda em português do vídeo;
-  sem ela, é gerada pelo Ollama local (lotes de 15 falas com as anteriores como contexto, mantendo nomes e títulos),
-  aparece aos poucos e fica salva. Uma falha pode ser retomada de onde parou. ~2,5 min para um vídeo de 9 min.
+- **Tradução da frase (PT):** ajuda pontual para tirar uma dúvida: traduz só a frase atual (Ollama local, com as
+  falas anteriores de contexto; ~3 s) e some ao passar para a próxima. Usa a legenda em português do vídeo quando
+  existe e guarda o resultado, então pedir de novo é instantâneo. Não conta como ajuda.
 - **Correções:** *Corrigir legendas* edita texto, horários e tradução de cada fala sem transcrever de novo. No player,
   "A legenda não corresponde ao áudio" pula a fala e a sinaliza para correção.
 - **Painel:** acerto por vídeo e dificuldade, onde você parou, palavras mais erradas (erros/tentativas), evolução por

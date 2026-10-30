@@ -28,7 +28,6 @@ from ..media.subtitles import Cue
 from ..media.transcriber import TranscriptionError
 from ..repositories import listening as repo
 from ..repositories import settings as settings_repo
-from . import settings_service
 from .exercise_service import NotFound
 
 log = logging.getLogger(__name__)
@@ -310,7 +309,6 @@ def prepare(conn: sqlite3.Connection, video_id: int, videos_dir: Path, cache_dir
                 "processed_fingerprint": current["fingerprint"], "pipeline_version": PIPELINE_VERSION,
                 "processing_rev": rev, "playback_path": playback_path, "subtitle_source": source,
                 "translation_source": translation[1] if translation else None,
-                "translation_status": None, "translation_progress": None, "translation_error": None,
                 "thumbnail_path": current["thumbnail_path"] or (
                     str(work / "thumbnail.jpg") if (work / "thumbnail.jpg").exists() else None),
             })
@@ -331,19 +329,15 @@ def clear_cache(cache_dir: Path, video_id: int) -> None:
 # ---------- fila em segundo plano ----------
 
 class ListeningWorker:
-    """Filas: metadados/miniaturas (rápidas), preparação (pesada, uma de cada vez), downloads e traduções.
+    """Três filas: metadados/miniaturas (rápidas), preparação (pesada, uma de cada vez) e downloads.
 
     Com `inline=True` (testes) o trabalho roda na hora, na própria chamada.
     """
 
-    KINDS = ("meta", "prepare", "download", "translate")
-
     def __init__(self, db_path: Path | str, videos_dir: Path, cache_dir: Path, inline: bool = False):
         self.db_path, self.videos_dir, self.cache_dir, self.inline = db_path, videos_dir, cache_dir, inline
-        self._queues = {kind: queue.Queue() for kind in self.KINDS}
-        self._pending: dict[str, set[int]] = {kind: set() for kind in self.KINDS}
-        # Cliente do Ollama para as traduções (os testes trocam por um simulado).
-        self.llm_factory = settings_service.build_client
+        self._queues = {"meta": queue.Queue(), "prepare": queue.Queue(), "download": queue.Queue()}
+        self._pending: dict[str, set[int]] = {"meta": set(), "prepare": set(), "download": set()}
         self._lock = threading.Lock()
         self._threads: dict[str, threading.Thread] = {}
 
@@ -356,10 +350,6 @@ class ListeningWorker:
                 from .listening_downloads import run_download
 
                 run_download(conn, video_id, self.videos_dir, self.cache_dir, self)
-            elif kind == "translate":
-                from . import listening_translation
-
-                listening_translation.run(conn, video_id, self.llm_factory(conn))
             else:
                 prepare(conn, video_id, self.videos_dir, self.cache_dir)
         finally:

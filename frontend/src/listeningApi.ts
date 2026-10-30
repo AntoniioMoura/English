@@ -22,14 +22,7 @@ export interface ActiveSession {
   updated_at: string;
 }
 
-export interface TranslationState {
-  translation_source: "external" | "embedded" | "ai" | null;
-  translation_status: "running" | "error" | null;
-  translation_progress: number | null;
-  translation_error: string | null;
-}
-
-export interface VideoSummary extends TranslationState {
+export interface VideoSummary {
   id: number;
   title: string;
   file_name: string;
@@ -138,7 +131,7 @@ export interface Session {
   current_index: number;
   started_at: string;
   interval_seconds: number;
-  video: { id: number; title: string; duration: number | null; has_translation: boolean } & TranslationState;
+  video: { id: number; title: string; duration: number | null; has_translation: boolean };
   stats: SessionStats;
   items: SessionItem[];
   // Todas as falas do vídeo; as que são exercício vêm sem texto (não entregam a resposta).
@@ -241,7 +234,6 @@ export const listeningApi = {
   rename: (id: number, title: string) => call<VideoSummary>(`/api/listening/videos/${id}`, send("PATCH", { title })),
   prepare: (id: number, force = false) =>
     call<VideoSummary>(`/api/listening/videos/${id}/prepare`, send("POST", { force })),
-  translate: (id: number) => call<VideoSummary>(`/api/listening/videos/${id}/translate`, send("POST")),
   segments: (id: number) => call<Segment[]>(`/api/listening/videos/${id}/segments`),
   updateSegment: (id: number, changes: Partial<Pick<Segment, "text" | "start" | "end" | "translation_pt" | "flagged">>) =>
     call<Segment>(`/api/listening/segments/${id}`, send("PATCH", changes)),
@@ -252,6 +244,8 @@ export const listeningApi = {
     call<ItemResult>(item(sessionId, itemId, "check"), send("POST", { answers })),
   reveal: (sessionId: number, itemId: number, blank: number | null) =>
     call<ItemResult>(item(sessionId, itemId, "reveal"), send("POST", { blank })),
+  translate: (sessionId: number, itemId: number) =>
+    call<{ translation_pt: string }>(item(sessionId, itemId, "translate"), send("POST")),
   replay: (sessionId: number, itemId: number) => call<{ replays: number }>(item(sessionId, itemId, "replay"), send("POST")),
   skip: (sessionId: number, itemId: number, mismatch: boolean) =>
     call<ItemResult>(item(sessionId, itemId, "skip"), send("POST", { mismatch })),

@@ -12,6 +12,8 @@ from pathlib import Path
 from ..db import transaction, utcnow
 from ..domain import listening as rules
 from ..domain.rules import RuleViolation
+from ..llm import listening_operations as ai
+from ..llm.client import LLMClient
 from ..media import ffmpeg, transcriber, youtube
 from ..repositories import listening as repo
 from . import listening_downloads
@@ -40,11 +42,6 @@ def _require_item(conn: sqlite3.Connection, session: dict, item_id: int) -> dict
     if not item or item["session_id"] != session["id"]:
         raise NotFound("Trecho não encontrado nesta sessão.")
     return item
-
-
-def translation_state(video: dict) -> dict:
-    return {"translation_source": video["translation_source"], "translation_status": video["translation_status"],
-            "translation_progress": video["translation_progress"], "translation_error": video["translation_error"]}
 
 
 def display_title(video: dict) -> str:
@@ -76,7 +73,6 @@ def video_summary(video: dict, worker: "media.ListeningWorker | None" = None, se
         "error_message": video["error_message"] if status == "error" else None,
         "subtitle_source": video["subtitle_source"] if status == "ready" else None,
         "has_translation": bool(video["translation_source"]) and status == "ready",
-        **translation_state(video),
         "converted": bool(video["playback_path"]),
         "updated_at": video["updated_at"],
         "active_sessions": [
@@ -457,7 +453,7 @@ def session_state(conn: sqlite3.Connection, session_id: int) -> dict:
         "started_at": session["started_at"],
         "interval_seconds": session["interval_seconds"],
         "video": {"id": video["id"], "title": display_title(video), "duration": video["duration"],
-                  "has_translation": bool(video["translation_source"]), **translation_state(video)},
+                  "has_translation": bool(video["translation_source"])},
         "stats": _session_stats(items, attempts),
         "items": [item_state(i, by_item.get(i["id"], [])) for i in items],
         "context": _context_lines(conn, session, items),
@@ -571,6 +567,26 @@ def reveal(conn: sqlite3.Connection, session_id: int, item_id: int, blank: int |
         for b in targets:
             repo.insert_attempt(conn, _attempt_row(session, item, b["word_index"], None, False, True))
     return _after_item_change(conn, session, item)
+
+
+def translate(conn: sqlite3.Connection, llm: LLMClient, session_id: int, item_id: int) -> dict:
+    """Tradução da frase atual, para tirar uma dúvida. Não conta como ajuda.
+
+    Usa a legenda em português do vídeo, se houver; senão pede ao Ollama (com as falas anteriores de contexto)
+    e guarda o resultado na fala, para a próxima vez ser instantânea.
+    """
+    session = _require_session(conn, session_id)
+    item = _require_item(conn, session, item_id)
+    segment = repo.get_segment(conn, item["segment_id"])
+    if segment["translation_pt"]:
+        return {"translation_pt": segment["translation_pt"]}
+    previous = conn.execute(
+        """SELECT text FROM listening_segments WHERE video_id = ? AND active = 1 AND idx < ?
+           ORDER BY idx DESC LIMIT 3""", (segment["video_id"], segment["idx"])).fetchall()
+    text = ai.translate_sentence(llm, segment["text"], [r["text"] for r in reversed(previous)])
+    with transaction(conn):
+        repo.update_segment(conn, segment["id"], {"translation_pt": text})
+    return {"translation_pt": text}
 
 
 def replay(conn: sqlite3.Connection, session_id: int, item_id: int) -> dict:

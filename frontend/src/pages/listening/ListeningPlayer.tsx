@@ -1,10 +1,9 @@
 import { KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { formatTime, ItemResult, listeningApi, pct, Session, SessionItem, TranslationState } from "../../listeningApi";
+import { formatTime, ItemResult, listeningApi, pct, Session, SessionItem } from "../../listeningApi";
 import { setSoundEnabled, soundEnabled, sounds } from "../../sounds";
 
 const PREROLL = 0.15; // começa um pouco antes para não cortar a primeira sílaba
-const TRANSLATION_KEY = "listening.translation";
 
 // Conferência em tempo real: ignora só maiúsculas e o tipo de apóstrofo.
 const fold = (value: string) => value.toLowerCase().replace(/[’‘`´]/g, "'");
@@ -37,63 +36,10 @@ export function ListeningPlayer() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [soundOn, setSoundOn] = useState(soundEnabled);
-  const [showTranslation, setShowTranslation] = useState(() => {
-    try {
-      return localStorage.getItem(TRANSLATION_KEY) === "on";
-    } catch {
-      return false;
-    }
-  });
-
-  function toggleTranslation() {
-    setShowTranslation((on) => {
-      try {
-        localStorage.setItem(TRANSLATION_KEY, on ? "off" : "on"); // lembra a escolha entre sessões
-      } catch {
-        /* sem armazenamento: vale só nesta visita */
-      }
-      return !on;
-    });
-  }
-  // Sem legenda em português: a tradução é gerada pelo Ollama local (uma vez; fica salva).
-  async function startTranslation() {
-    if (!session) return;
-    try {
-      const video = await listeningApi.translate(session.video.id);
-      setSession((prev) => prev && { ...prev, video: { ...prev.video, ...pickTranslation(video) } });
-    } catch (e) {
-      setError((e as Error).message);
-    }
-  }
-
-  useEffect(() => {
-    const video = session?.video;
-    if (showTranslation && video && !video.has_translation && video.translation_status === null) startTranslation();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showTranslation, session?.video.id]);
-
-  // Enquanto a IA traduz, busca as traduções já prontas (aparecem aos poucos).
-  useEffect(() => {
-    if (!showTranslation || session?.video.translation_status !== "running") return;
-    const timer = window.setInterval(async () => {
-      try {
-        const fresh = await listeningApi.session(sessionId);
-        setSession((prev) => {
-          if (!prev) return prev;
-          const byId = new Map(fresh.items.map((i) => [i.id, i.translation_pt]));
-          return {
-            ...prev,
-            video: { ...prev.video, ...pickTranslation(fresh.video), has_translation: fresh.video.has_translation },
-            items: prev.items.map((i) => ({ ...i, translation_pt: byId.get(i.id) ?? i.translation_pt })),
-            context: fresh.context,
-          };
-        });
-      } catch {
-        /* tenta de novo no próximo ciclo */
-      }
-    }, 2500);
-    return () => window.clearInterval(timer);
-  }, [showTranslation, session?.video.translation_status, sessionId]);
+  // Tradução da frase atual, pedida no "PT" para tirar uma dúvida; some ao trocar de frase.
+  const [translation, setTranslation] = useState<{ itemId: number; text: string | null; error: string | null } | null>(
+    null,
+  );
 
   // Frase concluída agora (anima só na hora; revisitar uma frase mostra o resumo sem festa).
   const [celebrating, setCelebrating] = useState<number | null>(null);
@@ -163,6 +109,7 @@ export function ListeningPlayer() {
   useEffect(() => {
     if (!item || !session) return;
     setCelebrating(null);
+    setTranslation(null);
     if (item.status === "pending") {
       setTime(runStart(session, index));
       playUntil(item, runStart(session, index));
@@ -211,6 +158,22 @@ export function ListeningPlayer() {
       el?.select();
     } else {
       nextButton.current?.focus();
+    }
+  }
+
+  async function toggleTranslation() {
+    if (!item || !session) return;
+    if (translation?.itemId === item.id) {
+      setTranslation(null);
+      return;
+    }
+    const itemId = item.id;
+    setTranslation({ itemId, text: null, error: null });
+    try {
+      const { translation_pt } = await listeningApi.translate(session.id, itemId);
+      setTranslation((t) => (t?.itemId === itemId ? { itemId, text: translation_pt, error: null } : t));
+    } catch (e) {
+      setTranslation((t) => (t?.itemId === itemId ? { itemId, text: null, error: (e as Error).message } : t));
     }
   }
 
@@ -415,25 +378,7 @@ export function ListeningPlayer() {
   }
 
   const finished = session.status !== "active";
-  const translationOn = showTranslation;
-  const translating = session.video.translation_status === "running";
-
-  // Linha da tradução: a tradução da fala, o andamento da geração pela IA ou o erro (com "tentar de novo").
-  const translationLine = (text: string | null | undefined) => {
-    if (text) return text;
-    if (translating) return `Gerando a tradução com a IA local… ${Math.round((session.video.translation_progress ?? 0) * 100)}%`;
-    if (session.video.translation_status === "error") {
-      return (
-        <>
-          Não foi possível traduzir: {session.video.translation_error}{" "}
-          <button className="link tiny" onClick={startTranslation}>
-            Tentar de novo
-          </button>
-        </>
-      );
-    }
-    return " ";
-  };
+  const translationShown = !!item && translation?.itemId === item.id;
   const contextLine = watching
     ? [...session.context].reverse().find((c) => c.text && time >= c.start - 0.05 && time <= c.end + 0.4)
     : undefined;
@@ -520,15 +465,10 @@ export function ListeningPlayer() {
             {soundOn ? "🔊" : "🔇"}
           </IconButton>
           <IconButton
-            label={
-              showTranslation
-                ? "Ocultar tradução"
-                : session.video.has_translation
-                  ? "Mostrar tradução"
-                  : "Mostrar tradução (gerada pela IA local na primeira vez)"
-            }
+            label={translationShown ? "Ocultar tradução" : "Traduzir a frase atual"}
             onClick={toggleTranslation}
-            active={showTranslation}
+            disabled={!item || watching}
+            active={translationShown}
           >
             PT
           </IconButton>
@@ -547,7 +487,6 @@ export function ListeningPlayer() {
 
       {item && watching && (
         <section className="sentence-area">
-          {translationOn && <p className="translation-above">{translationLine(contextLine?.translation_pt)}</p>}
           <p className="sentence sentence-context" aria-live="polite">
             {contextLine?.text ?? "\u00a0"}
           </p>
@@ -556,7 +495,11 @@ export function ListeningPlayer() {
 
       {item && !watching && (
         <section className={`sentence-area ${item.status !== "pending" ? "sentence-done" : ""}`}>
-          {translationOn && <p className="translation-above">{translationLine(item.translation_pt)}</p>}
+          {translationShown && (
+            <p className={`translation-above ${translation?.error ? "error-text" : ""}`}>
+              {translation?.text ?? translation?.error ?? "Traduzindo…"}
+            </p>
+          )}
           <p className={`sentence ${celebrating === item.id && isPerfect(item) ? "sentence-celebrate" : ""}`} aria-live="polite">
             {item.parts.map((part, n) => {
               if (part.blank === null) {
@@ -680,15 +623,6 @@ export function ListeningPlayer() {
 
     </div>
   );
-}
-
-function pickTranslation(v: TranslationState): TranslationState {
-  return {
-    translation_source: v.translation_source,
-    translation_status: v.translation_status,
-    translation_progress: v.translation_progress,
-    translation_error: v.translation_error,
-  };
 }
 
 function isPerfect(item: SessionItem): boolean {
