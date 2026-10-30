@@ -458,6 +458,8 @@ a { color: inherit; text-decoration: none; }
 .word-correct { color: var(--ok); border-bottom: 2px solid #86efac; }
 .word-revealed { color: var(--improve); border-bottom: 2px solid #fcd34d; }
 /* Recompensa da frase concluída */
+.done-actions { display: flex; flex-direction: column; align-items: center; gap: 16px; }
+
 .reward {
   position: relative; align-self: center; display: inline-flex; align-items: center; gap: 12px;
   padding: 8px 18px; border-radius: 999px; font-weight: 700;

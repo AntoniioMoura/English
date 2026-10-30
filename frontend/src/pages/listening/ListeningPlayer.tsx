@@ -464,7 +464,6 @@ export function ListeningPlayer() {
 
       {item && !watching && (
         <section className={`sentence-area ${item.status !== "pending" ? "sentence-done" : ""}`}>
-          {item.status === "done" && <Reward item={item} streak={streakAt(session, index)} animate={celebrating === item.id} />}
           <p className={`sentence ${celebrating === item.id && isPerfect(item) ? "sentence-celebrate" : ""}`} aria-live="polite">
             {item.parts.map((part, n) => {
               if (part.blank === null) {
@@ -514,8 +513,8 @@ export function ListeningPlayer() {
             <p className="muted tiny center-text">Palavras riscadas estão na legenda, mas não são ditas no áudio.</p>
           )}
 
-          <div className="sentence-actions">
-            {item.status === "pending" ? (
+          {item.status === "pending" ? (
+            <div className="sentence-actions">
               <>
                 <div className="skip-wrap">
                   <button className="link small" onClick={() => setSkipMenu((v) => !v)}>
@@ -541,28 +540,29 @@ export function ListeningPlayer() {
                   Mostrar resposta
                 </button>
               </>
-            ) : (
-              <>
+            </div>
+          ) : (
+            // Concluída: o resultado logo abaixo da frase e, embaixo dele, o "Continuar".
+            <div className="done-actions">
+              {item.status === "done" ? (
+                <Reward item={item} streak={streakAt(session, index)} animate={celebrating === item.id} />
+              ) : (
                 <span className="muted small">
-                  {item.status === "skipped"
-                    ? item.flagged
-                      ? "Fala sinalizada: corrija-a em “Corrigir legendas”."
-                      : "Fala pulada."
-                    : ""}
+                  {item.flagged ? "Fala sinalizada: corrija-a em “Corrigir legendas”." : "Fala pulada."}
                 </span>
-                {item.flagged && (
-                  <Link className="link small" to={`/listening/video/${session.video.id}/edit#segment-${item.segment_id}`}>
-                    Corrigir legenda
-                  </Link>
-                )}
-                {!finished && (
-                  <button ref={nextButton} className="btn btn-primary" onClick={nextPending}>
-                    Continuar
-                  </button>
-                )}
-              </>
-            )}
-          </div>
+              )}
+              {item.flagged && (
+                <Link className="link small" to={`/listening/video/${session.video.id}/edit#segment-${item.segment_id}`}>
+                  Corrigir legenda
+                </Link>
+              )}
+              {!finished && (
+                <button ref={nextButton} className="btn btn-primary btn-lg" onClick={nextPending}>
+                  Continuar
+                </button>
+              )}
+            </div>
+          )}
         </section>
       )}
 
