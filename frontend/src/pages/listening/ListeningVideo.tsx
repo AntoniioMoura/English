@@ -155,7 +155,11 @@ export function ListeningVideo() {
           {video.status === "ready" && (
             <p className="muted small">
               {video.segment_count} falas · {video.subtitle_source && SOURCE_LABEL[video.subtitle_source]}
-              {video.has_translation ? " · com tradução" : " · sem tradução"}
+              {video.has_translation
+                ? video.translation_source === "ai"
+                  ? " · tradução gerada por IA"
+                  : " · com tradução"
+                : " · sem tradução (o botão PT do player gera uma)"}
               {video.converted ? " · versão convertida para o navegador" : ""}
               {video.study.accuracy != null && ` · ${pct(video.study.accuracy)} de acerto`}
             </p>

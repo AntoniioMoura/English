@@ -11,7 +11,7 @@ from .api.listening_routes import router as listening_router
 from .api.recall_routes import router as recall_router
 from .api.routes import router
 from .domain.rules import RuleViolation
-from .services import listening_downloads, listening_media, recall_service
+from .services import listening_downloads, listening_media, listening_translation, recall_service
 from .services.exercise_service import NotFound
 
 FRONTEND_DIST = config.BACKEND_DIR.parent / "frontend" / "dist"
@@ -25,6 +25,7 @@ def create_app(db_path: Path | str | None = None, videos_dir: Path | None = None
         recall_service.backfill_reviews(conn)  # revisões faltantes de erros já avaliados
         listening_media.recover_interrupted(conn)
         listening_downloads.recover_interrupted(conn)
+        listening_translation.recover_interrupted(conn)
         conn.close()
         yield
 

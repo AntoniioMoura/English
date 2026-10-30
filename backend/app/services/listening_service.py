@@ -42,6 +42,11 @@ def _require_item(conn: sqlite3.Connection, session: dict, item_id: int) -> dict
     return item
 
 
+def translation_state(video: dict) -> dict:
+    return {"translation_source": video["translation_source"], "translation_status": video["translation_status"],
+            "translation_progress": video["translation_progress"], "translation_error": video["translation_error"]}
+
+
 def display_title(video: dict) -> str:
     return video["title"] or Path(video["rel_path"]).stem.replace("_", " ").strip()
 
@@ -71,6 +76,7 @@ def video_summary(video: dict, worker: "media.ListeningWorker | None" = None, se
         "error_message": video["error_message"] if status == "error" else None,
         "subtitle_source": video["subtitle_source"] if status == "ready" else None,
         "has_translation": bool(video["translation_source"]) and status == "ready",
+        **translation_state(video),
         "converted": bool(video["playback_path"]),
         "updated_at": video["updated_at"],
         "active_sessions": [
@@ -451,7 +457,7 @@ def session_state(conn: sqlite3.Connection, session_id: int) -> dict:
         "started_at": session["started_at"],
         "interval_seconds": session["interval_seconds"],
         "video": {"id": video["id"], "title": display_title(video), "duration": video["duration"],
-                  "has_translation": bool(video["translation_source"])},
+                  "has_translation": bool(video["translation_source"]), **translation_state(video)},
         "stats": _session_stats(items, attempts),
         "items": [item_state(i, by_item.get(i["id"], [])) for i in items],
         "context": _context_lines(conn, session, items),

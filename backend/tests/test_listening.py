@@ -520,3 +520,88 @@ def test_overlapping_speech_never_cuts_heard_words_of_the_previous_line():
     first, second = subtitles.align_to_words(cues, spoken)
     assert first.end >= 116.12  # o "Play" inteiro toca
     assert second.start >= 116.12 - 0.05 and second.end >= 117.48
+
+
+# ---------- tradução com o Ollama (simulado) ----------
+
+import re  # noqa: E402
+
+from app.llm.client import LLMUnavailable  # noqa: E402
+from app.services import listening_translation  # noqa: E402
+
+MANY_SRT = "\n".join(
+    f"{i + 1}\n00:00:{i * 2:02},000 --> 00:00:{i * 2 + 1:02},500\nsentence number {i} for you to hear\n" for i in range(20))
+
+
+class TranslatorLLM:
+    """Traduz "N: texto" para "[pt] texto"; pode esquecer linhas ou falhar a partir de uma chamada."""
+
+    model = "fake"
+
+    def __init__(self, forget_once: set[int] = frozenset(), fail_from_call: int | None = None):
+        self.forget_once, self.fail_from_call, self.calls = set(forget_once), fail_from_call, []
+
+    def generate(self, system, user, schema, temperature=None):
+        self.calls.append(user)
+        if self.fail_from_call is not None and len(self.calls) >= self.fail_from_call:
+            raise LLMUnavailable("Não foi possível conectar ao Ollama.")
+        lines = re.findall(r"^(\d+): (.*)$", user.split("Traduza cada linha:")[1], re.M)
+        out = []
+        for n, text in lines:
+            if int(n) in self.forget_once:
+                self.forget_once.discard(int(n))
+                continue
+            out.append({"n": int(n), "pt": f"[pt] {text}"})
+        return schema.model_validate({"translations": out})
+
+
+@needs_ffmpeg
+def test_ai_translation_in_batches_with_context_and_retry_for_skipped_lines(lclient, videos):
+    make_video(videos / "talk.mp4", seconds=40)
+    (videos / "talk.en.srt").write_text(MANY_SRT, encoding="utf-8")
+    vid = scan(lclient)["videos"][0]["id"]
+    prepare(lclient, vid)
+    llm = TranslatorLLM(forget_once={3})
+    lclient.app.state.listening_worker.llm_factory = lambda conn: llm
+
+    video = lclient.post(f"/api/listening/videos/{vid}/translate").json()
+    assert video["translation_source"] == "ai" and video["translation_status"] is None and video["has_translation"]
+    segs = lclient.get(f"/api/listening/videos/{vid}/segments").json()
+    assert all(s["translation_pt"] == f"[pt] {s['text']}" for s in segs)  # a linha esquecida foi pedida de novo
+    assert len(llm.calls) == 3  # 15 + 5 linhas, mais a segunda chance da linha 3
+    assert "NÃO traduza" in llm.calls[2] or "NÃO traduza" in llm.calls[1]  # o 2º lote leva falas anteriores de contexto
+
+    session = lclient.post(f"/api/listening/videos/{vid}/sessions", json={"difficulty": "easy", "interval": 0}).json()
+    assert session["items"][0]["translation_pt"].startswith("[pt] ")
+
+
+@needs_ffmpeg
+def test_ai_translation_failure_is_recoverable_and_resumes(lclient, videos):
+    make_video(videos / "talk.mp4", seconds=40)
+    (videos / "talk.en.srt").write_text(MANY_SRT, encoding="utf-8")
+    vid = scan(lclient)["videos"][0]["id"]
+    prepare(lclient, vid)
+    lclient.app.state.listening_worker.llm_factory = lambda conn: TranslatorLLM(fail_from_call=2)
+
+    video = lclient.post(f"/api/listening/videos/{vid}/translate").json()
+    assert video["translation_status"] == "error" and "Ollama" in video["translation_error"]
+    assert 0 < video["translation_progress"] < 1  # o primeiro lote ficou salvo
+
+    retry = TranslatorLLM()
+    lclient.app.state.listening_worker.llm_factory = lambda conn: retry
+    video = lclient.post(f"/api/listening/videos/{vid}/translate").json()
+    assert video["translation_source"] == "ai" and video["translation_status"] is None
+    assert len(retry.calls) == 1  # só as 5 falas que faltavam
+
+
+@needs_ffmpeg
+def test_video_with_portuguese_subtitle_is_not_translated_by_ai(lclient, videos):
+    make_video(videos / "ep.mp4")
+    (videos / "ep.en.srt").write_text(SRT, encoding="utf-8")
+    (videos / "ep.pt-BR.srt").write_text(PT_SRT, encoding="utf-8")
+    vid = scan(lclient)["videos"][0]["id"]
+    prepare(lclient, vid)
+    llm = TranslatorLLM()
+    lclient.app.state.listening_worker.llm_factory = lambda conn: llm
+    video = lclient.post(f"/api/listening/videos/{vid}/translate").json()
+    assert video["translation_source"] == "external" and llm.calls == []

@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field
 
 from ..services import listening_downloads as downloads
 from ..services import listening_media as media
+from ..services import listening_translation as translation
 from ..services import listening_service as service
 from .deps import get_conn
 
@@ -98,6 +99,14 @@ def rename(video_id: int, body: VideoPatch, conn: sqlite3.Connection = Depends(g
 def prepare(video_id: int, body: PrepareIn | None = None, conn: sqlite3.Connection = Depends(get_conn),
             worker: media.ListeningWorker = Depends(get_worker)):
     return service.prepare_video(conn, worker, video_id, force=bool(body and body.force))
+
+
+@router.post("/videos/{video_id}/translate")
+def translate(video_id: int, conn: sqlite3.Connection = Depends(get_conn),
+              worker: media.ListeningWorker = Depends(get_worker)):
+    """Gera a tradução das falas com o Ollama local (vídeos sem legenda em português)."""
+    translation.start(conn, worker, video_id)
+    return service.video_detail(conn, worker, video_id)
 
 
 @router.get("/videos/{video_id}/stream")
