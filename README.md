@@ -7,7 +7,7 @@ revisões é o sistema, nunca a IA.
 
 ## Resumo
 
-O sistema tem dois modos de estudo e um relatório que junta os dois:
+O sistema tem três modos de estudo e um relatório:
 
 - **Criador de frases** — você escolhe uma estrutura (*Sentence Frame*, como `I wanted to ___, but ___.`),
   escreve uma frase e a expande em três rodadas. A avaliação vem só no final e separa **erros gramaticais**
@@ -17,27 +17,34 @@ O sistema tem dois modos de estudo e um relatório que junta os dois:
   que usam essas palavras, e você traduz. Cada erro vem com a **regra** para lembrar na próxima vez.
   Frases erradas entram numa **revisão espaçada**: a mesma frase volta até você acertar e, quanto mais
   você erra, mais ela reaparece nos dias seguintes. Limite de 10 frases novas erradas por dia.
-- **Relatórios** — análise do período com métricas calculadas pelo sistema (precisão por tópico,
-  erros mais frequentes, autocorreções, evolução semanal, palavras usadas e revisões), comentada pela IA
-  e exportável em Markdown.
+- **Listening com vídeos** — você assiste aos seus vídeos em inglês (da pasta `videos/` ou baixados do YouTube)
+  e completa as palavras que faltam nas legendas, conferidas letra a letra. O vídeo corre com a legenda completa e
+  para em algumas frases; as lacunas só caem em palavras realmente ditas no áudio. Erros, ajudas e progresso ficam
+  salvos, com painel e revisão dos trechos errados.
+- **Relatórios** — análise do Criador de frases e do Anki Premium no período, com métricas calculadas pelo
+  sistema (precisão por tópico, erros mais frequentes, autocorreções, evolução semanal, palavras usadas e
+  revisões), comentada pela IA e exportável em Markdown.
 
 Princípios que guiam a correção: maiúscula, pontuação, contrações e formas informais (`gonna`) não são
 erro; frase simples e correta não é penalizada; trechos que a IA "corrige" mas que não existem na sua
 resposta são descartados; avaliação incerta nunca pune.
 
-**Stack:** React + TypeScript + Vite · Python + FastAPI + Pydantic · SQLite · Ollama (padrão `qwen3:8b`).
-Especificações: [english_builder_especificacao.md](english_builder_especificacao.md) e
-[sentence_recall_especificacao.md](sentence_recall_especificacao.md) (o *Sentence Recall* virou o Anki Premium).
+**Stack:** React + TypeScript + Vite · Python + FastAPI + Pydantic · SQLite · Ollama (padrão `qwen3:8b`) ·
+FFmpeg + faster-whisper + yt-dlp (Listening).
+Especificações: [english_builder_especificacao.md](english_builder_especificacao.md),
+[sentence_recall_especificacao.md](sentence_recall_especificacao.md) (o *Sentence Recall* virou o Anki Premium) e
+[especificacao_listening_videos.md](especificacao_listening_videos.md).
 
 ## Como usar
 
 Requisitos: Python 3.11+, Node 18+ e [Ollama](https://ollama.com) com um modelo instalado
 (padrão: `qwen3:8b`, ajustável pela API `PUT /api/settings/ollama`). O Listening com vídeos usa também o
-[FFmpeg](https://ffmpeg.org) (`winget install Gyan.FFmpeg`).
+[FFmpeg](https://ffmpeg.org) (`winget install Gyan.FFmpeg`); detalhes na seção [Listening com vídeos](#listening-com-vídeos).
 
 No Windows, dê duplo clique em **`Iniciar English Builder.bat`** (ou rode `.\start.ps1`).
 
-Abre `http://localhost:8000`. Na primeira vez, cria o ambiente Python e gera a interface.
+Abre `http://localhost:8000`. Na primeira vez, cria o ambiente Python e gera a interface; depois, a interface é
+gerada de novo sempre que o código do frontend muda.
 Os dados ficam em `backend/data/english_builder.db` (SQLite) e sobrevivem entre execuções.
 
 ### Modo desenvolvimento
@@ -60,14 +67,18 @@ cd frontend; npm run typecheck
 backend/app/
   domain/rules.py        regras de progressão V0–V3 (fonte única da verdade)
   domain/evaluation.py   separa erro gramatical de ideia de melhoria; deduplica; monta o feedback curto
+  domain/listening.py    Listening: palavras, lacunas por dificuldade, nomes, frases-exercício, comparação
+  media/                 FFmpeg, legendas (leitura, sincronia e conferência com o áudio), Whisper, YouTube
   llm/                   cliente Ollama, schemas Pydantic, prompts e operações (suggest_hints, evaluate_exercise)
   repositories/          acesso SQLite (frames, exercícios, avaliações, configurações)
-  services/              orquestra o fluxo (cria exercício, salva versões, dicas, avaliação)
+  services/              orquestra o fluxo (cria exercício, salva versões, dicas, avaliação; catálogo, preparação,
+                         downloads e sessões do Listening, com fila em segundo plano)
   api/routes.py          endpoints HTTP finos
   migrations/            SQL numerado, aplicado automaticamente na inicialização
 frontend/src/
-  pages/                 Home, FramePicker, ExercisePage, Progress, Reports, Settings
+  pages/                 Home, FramePicker, ExercisePage, Progress, Reports, recall/*, listening/*
   components/            Stepper, HintsBox, FeedbackPanel...
+  sounds.ts              sons de digitação do Listening (Web Audio, sem arquivos)
   modes.ts               registro do menu — novos modos de estudo entram aqui
 ```
 
@@ -103,6 +114,14 @@ frontend/src/
 | PATCH | `/api/observations/{id}` | Revisa uma observação (`confirmed`/`dismissed`) |
 | GET/PUT | `/api/settings/ollama` | Endereço, modelo e timeout |
 | GET | `/api/settings/ollama/status` | Testa a conexão e lista modelos |
+| GET/POST | `/api/listening/library`, `/library/scan` | Catálogo; `scan` relê a pasta `videos/` |
+| POST | `/api/listening/videos/{id}/prepare` | Prepara (ou não faz nada se o cache vale); `{force}` refaz |
+| GET | `/api/listening/videos/{id}/stream`, `/thumbnail` | Vídeo (com Range) e miniatura |
+| GET/PATCH | `/api/listening/videos/{id}/segments`, `/segments/{id}` | Falas e correção manual |
+| POST | `/api/listening/videos/{id}/sessions` | `{difficulty, interval, mode, restart}` — retoma ou cria |
+| POST | `/api/listening/sessions/{id}/items/{item}/check` · `reveal` · `replay` · `skip` · `translate` | Exercício |
+| GET | `/api/listening/stats` | Painel |
+| GET/POST/DELETE | `/api/listening/downloads` | Downloads do YouTube |
 
 ## Relatórios (Fase 2)
 
@@ -142,51 +161,73 @@ agendador substituível em [domain/scheduler.py](backend/app/domain/scheduler.py
 
 ## Listening com vídeos
 
-Especificação em [especificacao_listening_videos.md](especificacao_listening_videos.md). Rotas em `/api/listening/*`
-([listening_routes.py](backend/app/api/listening_routes.py)); regras de lacunas e comparação em
+Especificação original em [especificacao_listening_videos.md](especificacao_listening_videos.md) (algumas decisões
+mudaram durante o desenvolvimento; o que vale é o descrito aqui). Rotas em `/api/listening/*`
+([listening_routes.py](backend/app/api/listening_routes.py)); regras de lacunas, nomes e comparação em
 [domain/listening.py](backend/app/domain/listening.py); catálogo e preparação em
-[services/listening_media.py](backend/app/services/listening_media.py).
+[services/listening_media.py](backend/app/services/listening_media.py); sessões e painel em
+[services/listening_service.py](backend/app/services/listening_service.py).
 
-- **Vídeos:** coloque `.mp4`, `.mkv`, `.mov` ou `.webm` em `videos/` (subpastas viram categorias) e clique em
-  *Atualizar catálogo*. Miniatura e duração vêm do FFmpeg em segundo plano. Arquivo movido/renomeado é reconhecido
-  pelo conteúdo; arquivo removido fica como "ausente" e o histórico é mantido.
-- **Baixar do YouTube:** botão no catálogo; cole o link, escolha a categoria (subpasta, padrão `YouTube`) e a qualidade.
-  Usa [yt-dlp](https://github.com/yt-dlp/yt-dlp) (no `requirements.txt`) com o Node ou Deno instalado como runtime
-  JavaScript. Prefere H.264 + AAC (sem conversão), baixa só legendas feitas pelo autor em inglês/português (as
-  automáticas do YouTube repetem linhas; sem legenda, o Whisper transcreve) e já deixa o vídeo preparado. O download
-  acontece numa pasta temporária, então o catálogo nunca vê arquivos parciais. Se o YouTube mudar algo e o download
-  falhar, atualize: `backend\.venv\Scripts\pip install -U yt-dlp`.
-- **Requisitos extras:** FFmpeg (`winget install Gyan.FFmpeg`) e, para vídeos sem legenda,
-  [faster-whisper](https://github.com/SYSTRAN/faster-whisper) (já no `requirements.txt`; modelo padrão `large-v3`,
-  ajustável em `PATCH /api/listening/settings`). Para usar a GPU NVIDIA no Windows:
-  `backend\.venv\Scripts\pip install -r backend\requirements-gpu.txt`. Sem GPU, a transcrição roda na CPU.
-- **Legendas, por prioridade:** `nome.en.srt`/`.vtt` ao lado do vídeo (`nome.srt` sem idioma vale se o texto for
-  inglês) → faixa de legenda em inglês embutida → transcrição local com Whisper. Legenda em português
-  (`nome.pt-BR.srt` ou embutida) vira a tradução opcional.
-- **Cache:** a preparação acontece só na primeira abertura e fica em `backend/data/listening/<id>/` + banco. Só é refeita
-  se o conteúdo do arquivo (fingerprint: tamanho + hash do início/fim) ou a `PIPELINE_VERSION` mudarem. Vídeo que o
-  navegador não toca (MKV, HEVC, áudio AC3…) ganha uma cópia MP4 H.264/AAC; o original nunca é alterado.
-- **Ritmo:** o vídeo corre com a legenda completa e para só numa frase-exercício a cada ~15 s, ~30 s (padrão) ou
-  ~1 min — ou em todas as frases. Em cada janela entra a frase mais adequada (tamanho médio, palavras de verdade).
-- **Exercício:** cada lacuna aceita exatamente o número de letras da palavra e é conferida a cada tecla (verde certo,
-  vermelho errado); palavra certa trava e o cursor pula para a próxima; palavra completa e errada conta um erro.
-  *Revelar palavra em foco* (Ctrl+Enter) registra dificuldade. Com tudo preenchido aparece *Continuar*.
-- **Lacunas:** lacunas por dificuldade (Iniciante 10–15%, Fácil 25–30%, Médio 40–45%, Difícil 60%), sorteadas na
-  primeira vez com peso maior para palavras que você já errou e **fixas** depois disso (recomeçar repete as mesmas);
-  cada dificuldade tem as suas. *Mostrar resposta* revela a frase inteira e toca de novo (conta como ajuda).
-- **Fiel ao áudio:** a legenda é comparada palavra a palavra com o que o Whisper ouve. Só viram lacuna palavras
-  realmente ditas; as que a legenda tem e a fala não (legendas "arrumadas" por quem as escreveu) aparecem riscadas, e
-  frases com muitas delas não viram exercício. Nomes e termos de nicho (maiúscula no meio da frase e nunca em
-  minúscula no vídeo, ou maiúsculas misturadas: Lilies, BLINKs) nunca viram lacuna nem entram no histórico de erros. Comparação ignora só
-  maiúsculas, apóstrofo tipográfico e pontuação das pontas (`dont` ≠ `don't`). Erro conta ao conferir, não por tecla;
-  revelar registra ajuda (não é acerto); repetições são contadas sem punir.
-- **Tradução da frase (PT):** ajuda pontual para tirar uma dúvida: traduz só a frase atual (Ollama local, com as
-  falas anteriores de contexto; ~3 s) e some ao passar para a próxima. Usa a legenda em português do vídeo quando
-  existe e guarda o resultado, então pedir de novo é instantâneo. Não conta como ajuda.
+### Requisitos e instalação
+
+- **FFmpeg** (`winget install Gyan.FFmpeg`): miniaturas, leitura de legendas embutidas, extração de áudio e conversão.
+- **faster-whisper** (no `requirements.txt`; modelo padrão `large-v3`, ajustável em `PATCH /api/listening/settings`):
+  transcreve vídeos sem legenda e confere/ressincroniza as legendas existentes. Para usar a GPU NVIDIA no Windows:
+  `backend\.venv\Scripts\pip install -r backend\requirements-gpu.txt`. Sem GPU (ou se ela falhar), roda na CPU, mais devagar.
+- **yt-dlp** (no `requirements.txt`) + **Node** ou **Deno** instalado: download do YouTube.
+- **Ollama**: só para a tradução pontual da frase (botão PT).
+
+### Vídeos e catálogo
+
+- Coloque `.mp4`, `.mkv`, `.mov` ou `.webm` em `videos/` (subpastas viram categorias; a pasta não vai para o git) e clique
+  em *Atualizar catálogo*. Miniatura e duração vêm do FFmpeg em segundo plano.
+- Cada vídeo é identificado pelo conteúdo (tamanho + hash do início/fim): arquivo movido ou renomeado mantém o histórico;
+  arquivo removido fica como "ausente", sem apagar nada.
+- **Baixar do YouTube:** botão no catálogo; cole o link, escolha a categoria (padrão `YouTube`) e a qualidade máxima.
+  Prefere H.264 + AAC (toca sem conversão) e baixa só legendas feitas pelo autor em inglês/português (as automáticas do
+  YouTube repetem linhas). O download acontece numa pasta temporária e o vídeo já entra preparado. Se o YouTube mudar algo
+  e o download falhar: `backend\.venv\Scripts\pip install -U yt-dlp`.
+
+### Preparação (uma vez por vídeo)
+
+- **Texto em inglês, por prioridade:** `nome.en.srt`/`.vtt` ao lado do vídeo (`nome.srt` sem idioma vale se o texto for
+  inglês) → faixa de legenda em inglês embutida → transcrição local com o Whisper. A IA do Ollama nunca escreve a legenda.
+- **Sincronia pelo áudio:** legendas (sobretudo as do YouTube) entram atrasadas e com atraso variável. O Whisper mede o
+  tempo de cada palavra falada e cada fala da legenda é reposicionada, sem mudar o texto. Fala sobreposta nunca faz uma
+  fala cortar palavras ouvidas da anterior.
+- **Fidelidade:** cada palavra da legenda é comparada com o que foi dito. Palavras que a legenda tem e a fala não
+  (legenda "arrumada" por quem a escreveu) aparecem riscadas e nunca viram lacuna; frases com muitas delas não viram
+  exercício. Hesitações (uh, um) não são marcadas.
+- **Reprodução:** vídeo que o navegador não toca (MKV, HEVC, áudio AC3…) ganha uma cópia MP4 H.264/AAC; o original nunca
+  é alterado.
+- **Cache:** tudo fica em `backend/data/listening/<id>/` + banco e só é refeito se o conteúdo do arquivo ou a
+  `PIPELINE_VERSION` mudarem. Trocar dificuldade ou repetir sessão nunca reprocessa.
+
+### Estudo
+
+- **Ritmo:** o vídeo corre com a legenda completa e para só numa frase-exercício a cada ~15 s, ~30 s (padrão) ou ~1 min,
+  ou em todas as frases. Em cada janela entra a frase mais adequada (tamanho médio, palavras de verdade, fiel ao áudio).
+- **Lacunas:** Iniciante 10–15%, Fácil 25–30%, Médio 40–45%, Difícil 60% das palavras. Sorteadas na primeira vez (com peso
+  maior para palavras que você já errou) e **fixas** depois disso; cada dificuldade tem as suas. Nunca escondem números,
+  descrições sonoras, nomes e termos de nicho (Lilies, BLINKs, títulos) nem palavras que não foram ditas.
+- **Digitação em tempo real:** cada lacuna aceita exatamente o número de letras da palavra e é conferida a cada tecla
+  (verde certo, vermelho errado). Palavra certa trava e o cursor pula para a próxima; palavra completa e errada conta um
+  erro (uma vez por resposta). Só maiúsculas e o tipo de apóstrofo são ignorados (`dont` ≠ `don't`).
+- **Ajuda:** 💡 / Ctrl+Enter revela a palavra em foco; *Mostrar resposta* revela a frase inteira e toca de novo. Os dois
+  contam como dificuldade (não como acerto). ↻ / Ctrl+Espaço repete a frase; repetições são registradas sem punir.
+- **Tradução (PT):** traduz só a frase atual, para tirar uma dúvida (Ollama local, com as 3 falas anteriores de
+  contexto; ~3 s). Some ao passar para a próxima frase; usa a legenda em português do vídeo quando existe e guarda o
+  resultado. Não conta como ajuda.
+- **Recompensa:** sons suaves de digitação (🔊/🔇 nos controles), selo "Perfeito!" com confete e sequência de frases
+  perfeitas; com erro ou ajuda, "Frase concluída · 1 erro". *Continuar* leva à próxima frase; ‹ › navegam só entre as
+  frases já concluídas.
 - **Correções:** *Corrigir legendas* edita texto, horários e tradução de cada fala sem transcrever de novo. No player,
   "A legenda não corresponde ao áudio" pula a fala e a sinaliza para correção.
-- **Painel:** acerto por vídeo e dificuldade, onde você parou, palavras mais erradas (erros/tentativas), evolução por
-  sessão e revisão dos trechos errados (reaproveita os trechos e foca nas palavras erradas).
+
+### Painel
+
+Acerto por vídeo e dificuldade, onde você parou, palavras mais erradas (erros ÷ tentativas, sem nomes e termos de nicho),
+evolução por sessão e revisão dos trechos errados (reaproveita os trechos e foca nas palavras erradas).
 
 ## Próximos passos
 
