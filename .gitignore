@@ -1,0 +1,19 @@
+# Ambientes e dependências (recriados pelo start.ps1)
+backend/.venv/
+node_modules/
+frontend/node_modules/
+
+# Build da interface (gerado por `npm run build`)
+frontend/dist/
+
+# Dados pessoais de estudo (banco SQLite local)
+backend/data/
+
+# Caches
+__pycache__/
+*.pyc
+.pytest_cache/
+*.tsbuildinfo
+
+# Configuração local das sessões do Claude Code
+.claude/
