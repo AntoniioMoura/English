@@ -39,6 +39,7 @@ class SessionIn(BaseModel):
     difficulty: str
     mode: str = Field(default="normal", pattern="^(normal|review)$")
     restart: bool = False
+    interval: int = 30  # segundos entre frases-exercício; 0 = todas
 
 
 class AnswersIn(BaseModel):
@@ -128,7 +129,7 @@ def edit_segment(segment_id: int, body: SegmentPatch, conn: sqlite3.Connection =
 
 @router.post("/videos/{video_id}/sessions", status_code=201)
 def start_session(video_id: int, body: SessionIn, conn: sqlite3.Connection = Depends(get_conn)):
-    return service.start_session(conn, video_id, body.difficulty, body.mode, body.restart)
+    return service.start_session(conn, video_id, body.difficulty, body.mode, body.restart, body.interval)
 
 
 @router.get("/sessions/{session_id}")

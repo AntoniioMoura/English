@@ -99,9 +99,10 @@ def active_sessions(conn: sqlite3.Connection, video_id: int | None = None) -> li
 def insert_session(conn: sqlite3.Connection, data: dict) -> int:
     now = utcnow()
     cur = conn.execute(
-        """INSERT INTO listening_sessions (video_id, difficulty, mode, processing_rev, seed, started_at, updated_at)
-           VALUES (:video_id, :difficulty, :mode, :processing_rev, :seed, :now, :now)""",
-        {**data, "now": now},
+        """INSERT INTO listening_sessions (video_id, difficulty, mode, processing_rev, seed, interval_seconds,
+                                          started_at, updated_at)
+           VALUES (:video_id, :difficulty, :mode, :processing_rev, :seed, :interval_seconds, :now, :now)""",
+        {"interval_seconds": 0, **data, "now": now},
     )
     return cur.lastrowid
 

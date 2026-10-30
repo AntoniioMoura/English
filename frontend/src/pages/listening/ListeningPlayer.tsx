@@ -4,6 +4,14 @@ import { formatTime, ItemResult, listeningApi, pct, Session, SessionItem } from 
 
 const PREROLL = 0.15; // começa um pouco antes para não cortar a primeira sílaba
 
+// De onde o vídeo corre até a frase `i`: do fim da frase-exercício anterior (com a legenda completa no meio).
+function runStart(session: Session, i: number): number {
+  const it = session.items[i];
+  if (session.mode === "review") return Math.max(it.start - PREROLL, 0);
+  if (i === 0) return Math.max(Math.min(session.context[0]?.start ?? it.start, it.start) - 0.5, 0);
+  return Math.max(Math.min(session.items[i - 1].end, it.start - PREROLL), 0);
+}
+
 export function ListeningPlayer() {
   const { id } = useParams();
   const sessionId = Number(id);
@@ -54,10 +62,11 @@ export function ListeningPlayer() {
     if (!checkStop() && !videoRef.current?.paused) requestAnimationFrame(tick);
   }, [checkStop]);
 
-  const playSegment = useCallback(async (it: SessionItem) => {
+  // Toca de `from` até o fim da frase `it` e pausa lá.
+  const playUntil = useCallback(async (it: SessionItem, from: number) => {
     const video = videoRef.current;
     if (!video) return;
-    video.currentTime = Math.max(it.start - PREROLL, 0);
+    video.currentTime = from;
     stopAt.current = it.end;
     try {
       await video.play();
@@ -67,17 +76,26 @@ export function ListeningPlayer() {
     }
   }, []);
 
-  // Ao trocar de fala: toca o trecho e põe o foco na primeira lacuna aberta.
+  const playSegment = useCallback((it: SessionItem) => playUntil(it, Math.max(it.start - PREROLL, 0)), [playUntil]);
+
+  // Ao trocar de frase: o vídeo corre (com a legenda completa) desde a frase anterior e para no fim desta.
   useEffect(() => {
-    if (!item) return;
-    playSegment(item);
+    if (!item || !session) return;
+    setTime(runStart(session, index));
+    playUntil(item, runStart(session, index));
     setSkipMenu(false);
     setAnswers((prev) =>
       prev[item.id] ? prev : { ...prev, [item.id]: item.blanks.map((b) => (b.state === "wrong" ? b.last_typed ?? "" : "")) },
     );
-    window.setTimeout(() => focusFirstOpen(item), 30);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [item?.id]);
+
+  // Enquanto o vídeo ainda não chegou na frase-exercício, mostra a legenda completa das falas em volta.
+  const watching = !!item && time < item.start - PREROLL - 0.05;
+  useEffect(() => {
+    if (item && !watching) window.setTimeout(() => focusFirstOpen(item), 30);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [watching, item?.id]);
 
   function focusFirstOpen(it: SessionItem) {
     const open = it.blanks.find((b) => b.state === "hidden" || b.state === "wrong");
@@ -108,8 +126,8 @@ export function ListeningPlayer() {
       video.pause();
       return;
     }
-    const inside = video.currentTime >= item.start - PREROLL - 0.05 && video.currentTime < item.end - 0.05;
-    if (inside) {
+    const beforeEnd = video.currentTime < item.end - 0.05 && video.currentTime >= runStart(session!, index) - 0.05;
+    if (beforeEnd) {
       stopAt.current = item.end;
       video.play().catch(() => setNeedsGesture(true));
     } else {
@@ -171,6 +189,13 @@ export function ListeningPlayer() {
   const reveal = (blank: number | null) => {
     if (!item || !session || item.status !== "pending") return;
     run(() => listeningApi.reveal(session.id, item.id, blank));
+  };
+
+  // Mostra a frase inteira (conta como ajuda) e toca de novo para você ouvir sabendo a resposta.
+  const showAnswer = async () => {
+    if (!item || !session || item.status !== "pending") return;
+    await run(() => listeningApi.reveal(session.id, item.id, null));
+    playSegment(item);
   };
 
   const skip = (mismatch: boolean) => {
@@ -239,7 +264,8 @@ export function ListeningPlayer() {
         const target = e.target as HTMLElement;
         if (target.tagName === "BUTTON" && target !== nextButton.current) return;
         e.preventDefault();
-        if (item.status === "pending") check();
+        if (watching) playSegment(item); // pula o contexto e vai direto à frase
+        else if (item.status === "pending") check();
         else nextPending();
       } else if (e.key === "PageDown") {
         e.preventDefault();
@@ -264,6 +290,9 @@ export function ListeningPlayer() {
 
   const finished = session.status !== "active";
   const translationAvailable = session.video.has_translation && !!item?.translation_pt;
+  const contextLine = watching
+    ? [...session.context].reverse().find((c) => c.text && time >= c.start - 0.05 && time <= c.end + 0.4)
+    : undefined;
 
   return (
     <div className="player">
@@ -290,11 +319,15 @@ export function ListeningPlayer() {
           onPause={() => setPlaying(false)}
           onTimeUpdate={checkStop} // garantia: requestAnimationFrame para quando a aba fica em segundo plano
           onClick={togglePlay}
-          onLoadedMetadata={() => item && !playing && videoRef.current && (videoRef.current.currentTime = Math.max(item.start - PREROLL, 0))}
+          onLoadedMetadata={() => item && !playing && videoRef.current && (videoRef.current.currentTime = runStart(session, index))}
           onError={() => setError("O navegador não conseguiu reproduzir este vídeo. Tente prepará-lo novamente.")}
         />
         {(needsGesture || (!playing && !finished)) && (
-          <button className="video-play" onClick={needsGesture && item ? () => playSegment(item) : togglePlay} aria-label="Reproduzir trecho">
+          <button
+            className="video-play"
+            onClick={needsGesture && item ? () => playUntil(item, videoRef.current?.currentTime ?? item.start) : togglePlay}
+            aria-label="Reproduzir"
+          >
             ▶
           </button>
         )}
@@ -302,22 +335,24 @@ export function ListeningPlayer() {
 
       <div className="player-bar">
         <div className="player-progress">
-          <span className="eyebrow-label">Progresso</span>
+          <span className="eyebrow-label">
+            Frase{session.interval_seconds ? ` · uma a cada ~${session.interval_seconds} s` : ""}
+          </span>
           <strong>
             {index + 1}/{session.items.length}
           </strong>
         </div>
         <div className="player-controls">
-          <IconButton label="Fala anterior (PageUp)" onClick={() => goTo(index - 1)} disabled={index === 0}>
+          <IconButton label="Frase anterior (PageUp)" onClick={() => goTo(index - 1)} disabled={index === 0}>
             ‹
           </IconButton>
           <IconButton label={playing ? "Pausar" : "Reproduzir"} onClick={togglePlay}>
             {playing ? "❚❚" : "▶"}
           </IconButton>
-          <IconButton label="Repetir trecho (Ctrl+Espaço)" onClick={replay}>
+          <IconButton label="Repetir a frase (Ctrl+Espaço)" onClick={replay}>
             ↻
           </IconButton>
-          <IconButton label="Próxima fala (PageDown)" onClick={() => goTo(index + 1)} disabled={index >= session.items.length - 1}>
+          <IconButton label="Próxima frase (PageDown)" onClick={() => goTo(index + 1)} disabled={index >= session.items.length - 1}>
             ›
           </IconButton>
           <IconButton
@@ -348,7 +383,26 @@ export function ListeningPlayer() {
 
       {error && <div className="alert alert-error">{error}</div>}
 
-      {item && (
+      {item && watching && (
+        <section className="sentence-area">
+          <p className="sentence sentence-context" aria-live="polite">
+            {contextLine?.text ?? "\u00a0"}
+          </p>
+          {showTranslation && contextLine?.translation_pt && <p className="translation">{contextLine.translation_pt}</p>}
+          <div className="sentence-actions">
+            <span className="muted small">
+              {playing
+                ? `Assistindo… a próxima frase para completar chega em ${Math.max(Math.ceil(item.start - time), 1)} s.`
+                : "Pausado."}
+            </span>
+            <button className="btn btn-ghost" onClick={() => playSegment(item)}>
+              Ir direto para a frase →
+            </button>
+          </div>
+        </section>
+      )}
+
+      {item && !watching && (
         <section className={`sentence-area ${item.status !== "pending" ? "sentence-done" : ""}`}>
           <p className="sentence" aria-live="polite">
             {item.parts.map((part, n) => {
@@ -406,6 +460,14 @@ export function ListeningPlayer() {
                   )}
                 </div>
                 <span className="muted tiny">Enter confere · Espaço vai para a próxima lacuna</span>
+                <button
+                  className="btn btn-ghost"
+                  onClick={showAnswer}
+                  disabled={busy}
+                  title="Mostra a frase inteira e toca de novo (conta como ajuda)"
+                >
+                  Mostrar resposta
+                </button>
                 <button className="btn btn-primary" onClick={check} disabled={busy}>
                   Conferir
                 </button>
@@ -440,7 +502,7 @@ export function ListeningPlayer() {
           <h2>Sessão concluída 🎉</h2>
           <div className="tiles">
             <Tile value={pct(session.stats.accuracy)} label="acerto nas tentativas" />
-            <Tile value={`${session.stats.done}/${session.stats.total}`} label="falas concluídas" />
+            <Tile value={`${session.stats.done}/${session.stats.total}`} label="frases concluídas" />
             <Tile value={String(session.stats.helped)} label="palavras com ajuda" />
           </div>
           <div className="row end">
@@ -455,8 +517,8 @@ export function ListeningPlayer() {
       )}
 
       <p className="muted tiny shortcuts">
-        Atalhos: Enter conferir/próxima · Ctrl+Espaço repetir trecho · Ctrl+Enter revelar palavra · PageUp/PageDown navegar
-        {item ? ` · repetições desta fala: ${item.replays}` : ""}
+        Atalhos: Enter conferir/próxima · Ctrl+Espaço repetir a frase · Ctrl+Enter revelar a palavra em foco ·
+        PageUp/PageDown navegar{item ? ` · repetições desta frase: ${item.replays}` : ""}
       </p>
     </div>
   );

@@ -127,3 +127,40 @@ def choose_blanks(
         pick = rng.choices(range(len(pool)), weights=weights)[0]
         chosen.append(pool.pop(pick).word_index)
     return sorted(chosen)
+
+
+# ---------- frases-exercício ----------
+
+INTERVALS = (0, 15, 30, 60)  # segundos entre frases-exercício; 0 = todas as frases
+MIN_EXERCISE_WORDS = 3
+
+
+def _line_score(text: str) -> float:
+    """Frases de tamanho médio, com palavras de verdade, são os melhores exercícios."""
+    n = sum(1 for p in split_parts(text) if p.eligible)
+    if n < MIN_EXERCISE_WORDS:
+        return 0.0
+    return min(n, 12) - max(0, n - 20) * 0.5
+
+
+def select_exercise_lines(segments: list[dict], interval: int) -> list[int]:
+    """Escolhe as falas que viram exercício: a melhor de cada janela de `interval` segundos do vídeo.
+
+    Determinístico (mesmas falas → mesma escolha). Entre dois exercícios fica pelo menos meio
+    intervalo de vídeo corrido. Com `interval` 0, toda fala com palavra para completar vira exercício.
+    """
+    if interval <= 0:
+        return [s["id"] for s in segments if any(p.eligible for p in split_parts(s["text"]))]
+    windows: dict[int, list[dict]] = {}
+    for seg in segments:
+        if _line_score(seg["text"]) > 0:
+            windows.setdefault(int(seg["start"] // interval), []).append(seg)
+    chosen: list[int] = []
+    last_end = float("-inf")
+    for key in sorted(windows):
+        options = [s for s in windows[key] if s["start"] >= last_end + interval / 2]
+        if options:
+            best = max(options, key=lambda s: (_line_score(s["text"]), -s["start"]))
+            chosen.append(best["id"])
+            last_end = best["end"]
+    return chosen

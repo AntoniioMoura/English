@@ -16,6 +16,7 @@ export interface ActiveSession {
   id: number;
   difficulty: Difficulty;
   mode: "normal" | "review";
+  interval_seconds: number;
   done: number;
   total: number;
   updated_at: string;
@@ -128,10 +129,20 @@ export interface Session {
   mode: "normal" | "review";
   current_index: number;
   started_at: string;
+  interval_seconds: number;
   video: { id: number; title: string; duration: number | null; has_translation: boolean };
   stats: SessionStats;
   items: SessionItem[];
+  // Todas as falas do vídeo; as que são exercício vêm sem texto (não entregam a resposta).
+  context: { start: number; end: number; text: string | null; translation_pt: string | null }[];
 }
+
+export const RHYTHMS = [
+  { seconds: 15, label: "Intenso", hint: "uma frase a cada ~15 s" },
+  { seconds: 30, label: "Equilibrado", hint: "uma frase a cada ~30 s" },
+  { seconds: 60, label: "Leve", hint: "uma frase a cada ~1 min" },
+  { seconds: 0, label: "Todas", hint: "todas as frases do vídeo" },
+];
 
 export interface ItemResult {
   item: SessionItem;
@@ -225,8 +236,8 @@ export const listeningApi = {
   segments: (id: number) => call<Segment[]>(`/api/listening/videos/${id}/segments`),
   updateSegment: (id: number, changes: Partial<Pick<Segment, "text" | "start" | "end" | "translation_pt" | "flagged">>) =>
     call<Segment>(`/api/listening/segments/${id}`, send("PATCH", changes)),
-  startSession: (videoId: number, difficulty: Difficulty, mode: "normal" | "review" = "normal", restart = false) =>
-    call<Session>(`/api/listening/videos/${videoId}/sessions`, send("POST", { difficulty, mode, restart })),
+  startSession: (videoId: number, difficulty: Difficulty, mode: "normal" | "review" = "normal", restart = false, interval = 30) =>
+    call<Session>(`/api/listening/videos/${videoId}/sessions`, send("POST", { difficulty, mode, restart, interval })),
   session: (id: number) => call<Session>(`/api/listening/sessions/${id}`),
   check: (sessionId: number, itemId: number, answers: (string | null)[]) =>
     call<ItemResult>(item(sessionId, itemId, "check"), send("POST", { answers })),

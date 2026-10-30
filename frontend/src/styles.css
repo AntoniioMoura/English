@@ -405,6 +405,7 @@ a { color: inherit; text-decoration: none; }
 .video-hero { display: grid; grid-template-columns: 320px 1fr; gap: 22px; align-items: center; }
 .video-hero-thumb { border-radius: 10px; }
 .video-hero h1 { gap: 12px; }
+.video-hero h1 .link { font-size: 0.85rem; font-weight: 500; letter-spacing: 0; }
 .title-input { font-size: 1.2rem; max-width: 420px; }
 .resume-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
 .resume-card { display: flex; flex-direction: column; gap: 10px; transition: border-color 0.18s, transform 0.18s; }
@@ -453,6 +454,7 @@ a { color: inherit; text-decoration: none; }
 .blank-wrong { border-bottom: 2px solid var(--error); background: var(--error-soft); color: var(--error); }
 .word-correct { color: var(--ok); border-bottom: 2px solid #86efac; }
 .word-revealed { color: var(--improve); border-bottom: 2px solid #fcd34d; }
+.sentence-context { color: var(--muted); font-size: 1.45rem; min-height: 2.1em; }
 .translation { text-align: center; color: var(--muted); font-size: 1.02rem; }
 .sentence-actions { display: flex; justify-content: flex-end; align-items: center; gap: 14px; flex-wrap: wrap; }
 .sentence-actions > :first-child { margin-right: auto; }

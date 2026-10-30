@@ -1,9 +1,10 @@
 """Fluxo do Listening: catálogo → preparação → sessão (lacunas por dificuldade) → tentativas → painel.
 
-As lacunas são sorteadas ao criar a sessão e gravadas nela: recarregar a página não muda nada, e trocar de
-dificuldade cria outra sessão sem tocar nos trechos processados. Erros contam na conferência, nunca por tecla.
+As lacunas são gravadas na sessão e reaproveitadas nas próximas do mesmo vídeo e dificuldade; trocar de
+dificuldade escolhe outras, sem tocar nos trechos processados. Erros contam na conferência, nunca por tecla.
 """
 
+import json
 import random
 import sqlite3
 from pathlib import Path
@@ -73,7 +74,8 @@ def video_summary(video: dict, worker: "media.ListeningWorker | None" = None, se
         "converted": bool(video["playback_path"]),
         "updated_at": video["updated_at"],
         "active_sessions": [
-            {"id": s["id"], "difficulty": s["difficulty"], "mode": s["mode"], "done": s["done"], "total": s["total"],
+            {"id": s["id"], "difficulty": s["difficulty"], "mode": s["mode"], "interval_seconds": s["interval_seconds"],
+             "done": s["done"], "total": s["total"],
              "updated_at": s["updated_at"]}
             for s in (sessions or [])
         ],
@@ -227,19 +229,20 @@ def update_segment(conn: sqlite3.Connection, segment_id: int, changes: dict) -> 
 def _refresh_pending_items(conn: sqlite3.Connection, segment_id: int, text: str) -> None:
     """Sessões em andamento sem tentativa neste trecho passam a usar o texto corrigido."""
     rows = conn.execute(
-        """SELECT i.id, i.position, s.seed, s.difficulty FROM listening_session_items i
+        """SELECT i.id, s.video_id, s.difficulty FROM listening_session_items i
            JOIN listening_sessions s ON s.id = i.session_id
            WHERE i.segment_id = ? AND i.status = 'pending' AND s.status = 'active'
              AND NOT EXISTS (SELECT 1 FROM listening_word_attempts a WHERE a.item_id = i.id)""", (segment_id,))
     for r in rows.fetchall():
-        blanks = rules.choose_blanks(text, r["difficulty"], _item_rng(r["seed"], r["position"]))
+        blanks = rules.choose_blanks(text, r["difficulty"], _segment_rng(r["video_id"], r["difficulty"], segment_id))
         repo.update_item(conn, r["id"], {"text_snapshot": text, "blanks": blanks})
 
 
 # ---------- sessões ----------
 
-def _item_rng(seed: int, position: int) -> random.Random:
-    return random.Random(seed * 100_003 + position)
+def _segment_rng(video_id: int, difficulty: str, segment_id: int) -> random.Random:
+    """Sorteio estável: a mesma fala, no mesmo vídeo e dificuldade, sempre esconde as mesmas palavras."""
+    return random.Random(f"{video_id}:{difficulty}:{segment_id}")
 
 
 def _segments_to_review(conn: sqlite3.Connection, video_id: int) -> dict[int, set[str]]:
@@ -261,15 +264,39 @@ def _segments_to_review(conn: sqlite3.Connection, video_id: int) -> dict[int, se
     return result
 
 
+def _previous_blanks(conn: sqlite3.Connection, video: dict, difficulty: str) -> dict[int, tuple[str, list[int]]]:
+    """Lacunas já usadas neste vídeo e dificuldade (a sessão mais recente vence)."""
+    rows = conn.execute(
+        """SELECT i.segment_id, i.text_snapshot, i.blanks FROM listening_session_items i
+           JOIN listening_sessions s ON s.id = i.session_id
+           WHERE s.video_id = ? AND s.difficulty = ? AND s.mode = 'normal' AND s.processing_rev = ?
+           ORDER BY s.id DESC""", (video["id"], difficulty, video["processing_rev"]))
+    found: dict[int, tuple[str, list[int]]] = {}
+    for r in rows:
+        found.setdefault(r["segment_id"], (r["text_snapshot"], json.loads(r["blanks"])))
+    return found
+
+
 def start_session(conn: sqlite3.Connection, video_id: int, difficulty: str, mode: str = "normal",
-                  restart: bool = False) -> dict:
+                  restart: bool = False, interval: int = 30) -> dict:
+    """Retoma a sessão ativa (mesma dificuldade e ritmo) ou cria uma nova.
+
+    Só algumas falas viram exercício (uma a cada ~`interval` s); o resto do vídeo corre com a legenda.
+    As lacunas são fixas: a primeira sessão de um vídeo numa dificuldade sorteia (com mais peso para as
+    palavras que você já errou) e as seguintes reaproveitam a mesma escolha.
+    """
     if difficulty not in rules.DIFFICULTIES:
         raise RuleViolation("invalid_difficulty", "Dificuldade inválida.", 422)
+    if interval not in rules.INTERVALS:
+        raise RuleViolation("invalid_interval", "Ritmo inválido.", 422)
     video = _require_video(conn, video_id)
     if not media.is_prepared(video):
         raise RuleViolation("not_ready", "O vídeo ainda não foi preparado.")
+    if mode == "review":
+        interval = 0  # a revisão toca só as falas erradas, uma após a outra
     existing = repo.find_active_session(conn, video_id, difficulty, mode)
-    if existing and existing["processing_rev"] != video["processing_rev"]:
+    if existing and (existing["processing_rev"] != video["processing_rev"]
+                     or existing["interval_seconds"] != interval):
         with transaction(conn):
             repo.update_session(conn, existing["id"], {"status": "abandoned"})
         existing = None
@@ -282,11 +309,19 @@ def start_session(conn: sqlite3.Connection, video_id: int, difficulty: str, mode
         segs = [s for s in segs if s["id"] in focus]
         if not segs:
             raise RuleViolation("nothing_to_review", "Nenhum trecho errado para revisar neste vídeo.")
+    else:
+        picked = set(rules.select_exercise_lines(segs, interval))
+        segs = [s for s in segs if s["id"] in picked]
     history = repo.word_error_rates(conn)
-    seed = random.SystemRandom().randrange(1, 2**31)
+    previous = _previous_blanks(conn, video, difficulty) if mode == "normal" else {}
     items = []
     for s in segs:
-        blanks = rules.choose_blanks(s["text"], difficulty, _item_rng(seed, len(items)), history, focus.get(s["id"]))
+        reuse = previous.get(s["id"])
+        if reuse and reuse[0] == s["text"]:
+            blanks = reuse[1]
+        else:
+            blanks = rules.choose_blanks(s["text"], difficulty, _segment_rng(video_id, difficulty, s["id"]),
+                                         history, focus.get(s["id"]))
         if blanks:  # trecho sem palavra adequada (só [MUSIC], números) não vira exercício
             items.append({"segment_id": s["id"], "text": s["text"], "blanks": blanks})
     if not items:
@@ -295,7 +330,8 @@ def start_session(conn: sqlite3.Connection, video_id: int, difficulty: str, mode
         if existing:
             repo.update_session(conn, existing["id"], {"status": "abandoned"})
         session_id = repo.insert_session(conn, {"video_id": video_id, "difficulty": difficulty, "mode": mode,
-                                                "processing_rev": video["processing_rev"], "seed": seed})
+                                                "processing_rev": video["processing_rev"], "seed": 0,
+                                                "interval_seconds": interval})
         repo.insert_items(conn, session_id, items)
     return session_state(conn, session_id)
 
@@ -366,11 +402,28 @@ def session_state(conn: sqlite3.Connection, session_id: int) -> dict:
         "mode": session["mode"],
         "current_index": min(session["current_index"], len(items) - 1),
         "started_at": session["started_at"],
+        "interval_seconds": session["interval_seconds"],
         "video": {"id": video["id"], "title": display_title(video), "duration": video["duration"],
                   "has_translation": bool(video["translation_source"])},
         "stats": _session_stats(items, attempts),
         "items": [item_state(i, by_item.get(i["id"], [])) for i in items],
+        "context": _context_lines(conn, session, items),
     }
+
+
+def _context_lines(conn: sqlite3.Connection, session: dict, items: list[dict]) -> list[dict]:
+    """Legenda completa das falas entre os exercícios (o vídeo corre com ela até a próxima lacuna).
+
+    Falas que são exercício vão sem texto, para não entregarem a resposta.
+    """
+    if session["mode"] == "review":
+        return []
+    exercise = {i["segment_id"] for i in items}
+    return [
+        {"start": s["start"], "end": s["end"], "text": None if s["id"] in exercise else s["text"],
+         "translation_pt": None if s["id"] in exercise else s["translation_pt"]}
+        for s in repo.active_segments(conn, session["video_id"])
+    ]
 
 
 def _session_stats(items: list[dict], attempts: list[dict]) -> dict:

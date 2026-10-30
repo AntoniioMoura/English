@@ -261,7 +261,7 @@ def test_session_flow_attempts_help_replays_and_resume(lclient, videos):
     vid = scan(lclient)["videos"][0]["id"]
     prepare(lclient, vid)
 
-    r = lclient.post(f"/api/listening/videos/{vid}/sessions", json={"difficulty": "hard"})
+    r = lclient.post(f"/api/listening/videos/{vid}/sessions", json={"difficulty": "hard", "interval": 0})
     assert r.status_code == 201, r.text
     session = r.json()
     assert len(session["items"]) == 2  # "[MUSIC PLAYING]" não vira exercício
@@ -269,7 +269,7 @@ def test_session_flow_attempts_help_replays_and_resume(lclient, videos):
     assert item["text"] is None and all(p["text"] is None for p in item["parts"] if p["blank"] is not None)
 
     # a mesma sessão volta ao "recarregar" (lacunas estáveis)
-    again = lclient.post(f"/api/listening/videos/{vid}/sessions", json={"difficulty": "hard"}).json()
+    again = lclient.post(f"/api/listening/videos/{vid}/sessions", json={"difficulty": "hard", "interval": 0}).json()
     assert again["id"] == session["id"] and again["items"][1]["blanks"] == item["blanks"]
 
     words = rules.words("I don't know what you were thinking.")
@@ -317,8 +317,8 @@ def test_other_difficulty_creates_new_blanks_without_reprocessing(lclient, video
     vid = scan(lclient)["videos"][0]["id"]
     prepare(lclient, vid)
     monkeypatch.setattr("app.services.listening_media.prepare", lambda *a, **k: pytest.fail("reprocessou"))
-    easy = lclient.post(f"/api/listening/videos/{vid}/sessions", json={"difficulty": "beginner"}).json()
-    hard = lclient.post(f"/api/listening/videos/{vid}/sessions", json={"difficulty": "hard"}).json()
+    easy = lclient.post(f"/api/listening/videos/{vid}/sessions", json={"difficulty": "beginner", "interval": 0}).json()
+    hard = lclient.post(f"/api/listening/videos/{vid}/sessions", json={"difficulty": "hard", "interval": 0}).json()
     assert easy["id"] != hard["id"]
     assert sum(len(i["blanks"]) for i in hard["items"]) > sum(len(i["blanks"]) for i in easy["items"])
 
@@ -329,7 +329,7 @@ def test_segment_correction_and_mismatch_flag(lclient, videos):
     (videos / "ep.en.srt").write_text(SRT, encoding="utf-8")
     vid = scan(lclient)["videos"][0]["id"]
     prepare(lclient, vid)
-    session = lclient.post(f"/api/listening/videos/{vid}/sessions", json={"difficulty": "medium"}).json()
+    session = lclient.post(f"/api/listening/videos/{vid}/sessions", json={"difficulty": "medium", "interval": 0}).json()
     item = session["items"][0]
     out = lclient.post(f"/api/listening/sessions/{session['id']}/items/{item['id']}/skip",
                        json={"mismatch": True}).json()
@@ -397,3 +397,50 @@ def test_download_errors_are_recoverable(lclient, monkeypatch):
     assert lclient.post(f"/api/listening/downloads/{d['id']}/retry").json()["status"] == "error"
     assert lclient.delete(f"/api/listening/downloads/{d['id']}").status_code == 204
     assert lclient.get("/api/listening/downloads").json() == []
+
+
+# ---------- ritmo e lacunas fixas ----------
+
+def test_exercise_lines_follow_the_rhythm():
+    # 9 minutos com uma fala a cada ~2 s (como o vídeo real: 251 falas)
+    segs = [{"id": i, "start": i * 2.1, "end": i * 2.1 + 1.9,
+             "text": "Yes." if i % 5 == 0 else f"this is a sentence number {i} with several words"} for i in range(257)]
+    picked = rules.select_exercise_lines(segs, 30)
+    assert 14 <= len(picked) <= 19
+    starts = [segs[i]["start"] for i in picked]
+    assert all(b - a >= 15 for a, b in zip(starts, starts[1:]))  # pelo menos meio intervalo de vídeo corrido
+    assert all(segs[i]["text"] != "Yes." for i in picked)  # frases curtas demais não viram exercício
+    assert rules.select_exercise_lines(segs, 30) == picked  # determinístico
+    assert len(rules.select_exercise_lines(segs, 0)) == 257
+
+
+LONG_SRT = "\n".join(
+    f"{i + 1}\n00:00:{i * 4:02},000 --> 00:00:{i * 4 + 3:02},000\nline {i} has some english words to practice\n"
+    for i in range(14))
+
+
+@needs_ffmpeg
+def test_rhythm_blanks_are_fixed_and_context_hides_answers(lclient, videos):
+    make_video(videos / "long.mp4", seconds=58)
+    (videos / "long.en.srt").write_text(LONG_SRT, encoding="utf-8")
+    vid = scan(lclient)["videos"][0]["id"]
+    prepare(lclient, vid)
+
+    first = lclient.post(f"/api/listening/videos/{vid}/sessions", json={"difficulty": "medium", "interval": 15}).json()
+    assert 3 <= len(first["items"]) <= 5 and first["interval_seconds"] == 15
+    context = first["context"]
+    assert len(context) == 14
+    exercise_starts = {i["start"] for i in first["items"]}
+    assert all((c["text"] is None) == (c["start"] in exercise_starts) for c in context)  # resposta não vaza
+
+    blanks = {i["segment_id"]: i["blanks"] for i in first["items"]}
+    restarted = lclient.post(f"/api/listening/videos/{vid}/sessions",
+                             json={"difficulty": "medium", "interval": 15, "restart": True}).json()
+    assert restarted["id"] != first["id"]
+    assert {i["segment_id"]: i["blanks"] for i in restarted["items"]} == blanks  # mesmas lacunas ao recomeçar
+
+    every_line = lclient.post(f"/api/listening/videos/{vid}/sessions", json={"difficulty": "medium", "interval": 0}).json()
+    assert len(every_line["items"]) == 14  # outro ritmo: nova sessão; falas repetidas mantêm as lacunas
+    assert all(i["blanks"] == blanks[i["segment_id"]] for i in every_line["items"] if i["segment_id"] in blanks)
+    hard = lclient.post(f"/api/listening/videos/{vid}/sessions", json={"difficulty": "hard", "interval": 15}).json()
+    assert {i["segment_id"]: i["blanks"] for i in hard["items"]} != blanks  # outra dificuldade, outras lacunas

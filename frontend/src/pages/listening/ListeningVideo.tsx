@@ -1,6 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { DIFFICULTIES, DIFFICULTY_LABEL, Difficulty, formatTime, listeningApi, pct, VideoSummary } from "../../listeningApi";
+import { DIFFICULTIES, DIFFICULTY_LABEL, Difficulty, formatTime, listeningApi, pct, RHYTHMS, VideoSummary } from "../../listeningApi";
+
+const RHYTHM_KEY = "listening.rhythm";
+
+function savedRhythm(): number {
+  try {
+    const value = Number(localStorage.getItem(RHYTHM_KEY));
+    return RHYTHMS.some((r) => r.seconds === value) && localStorage.getItem(RHYTHM_KEY) !== null ? value : 30;
+  } catch {
+    return 30;
+  }
+}
 
 const SOURCE_LABEL = {
   external: "legenda externa",
@@ -18,6 +29,16 @@ export function ListeningVideo() {
   const [editingTitle, setEditingTitle] = useState(false);
   const [title, setTitle] = useState("");
   const asked = useRef(false);
+  const [rhythm, setRhythm] = useState(savedRhythm);
+
+  function chooseRhythm(seconds: number) {
+    setRhythm(seconds);
+    try {
+      localStorage.setItem(RHYTHM_KEY, String(seconds)); // lembra o último ritmo usado
+    } catch {
+      /* sem armazenamento: vale só nesta visita */
+    }
+  }
 
   const load = useCallback(async () => {
     try {
@@ -62,7 +83,7 @@ export function ListeningVideo() {
     setStarting(true);
     setError(null);
     try {
-      const session = await listeningApi.startSession(videoId, difficulty, mode, restart);
+      const session = await listeningApi.startSession(videoId, difficulty, mode, restart, rhythm);
       navigate(`/listening/session/${session.id}`);
     } catch (e) {
       setError((e as Error).message);
@@ -189,7 +210,8 @@ export function ListeningVideo() {
                         {s.mode === "review" ? " · revisão" : ""}
                       </strong>
                       <p className="muted small">
-                        {s.done} de {s.total} falas
+                        {s.done} de {s.total} frases
+                        {s.mode === "normal" && ` · ${RHYTHMS.find((r) => r.seconds === s.interval_seconds)?.label ?? ""}`}
                       </p>
                     </div>
                     <div className="bar">
@@ -203,25 +225,54 @@ export function ListeningVideo() {
           )}
 
           <section className="stack-sm">
+            <h2>Ritmo</h2>
+            <p className="muted small">
+              O vídeo corre com a legenda completa e para só nas frases para completar
+              {video.segment_count ? ` (o vídeo tem ${video.segment_count} falas)` : ""}.
+            </p>
+            <div className="chips">
+              {RHYTHMS.map((r) => (
+                <button
+                  key={r.seconds}
+                  className={`chip ${rhythm === r.seconds ? "chip-active" : ""}`}
+                  onClick={() => chooseRhythm(r.seconds)}
+                  title={r.hint}
+                >
+                  {r.label} <span className="muted tiny">· {r.hint}</span>
+                </button>
+              ))}
+            </div>
+          </section>
+
+          <section className="stack-sm">
             <h2>Escolha a dificuldade</h2>
-            <p className="muted small">As lacunas são sorteadas para cada sessão; trocar a dificuldade não reprocessa o vídeo.</p>
+            <p className="muted small">
+              As palavras ocultas são escolhidas na primeira vez e ficam fixas; cada dificuldade tem as suas.
+            </p>
             <div className="difficulty-grid">
               {DIFFICULTIES.map((d) => {
                 const active = sessionsByDifficulty.get(d.id);
+                const resumable = active && active.interval_seconds === rhythm;
                 return (
                   <div key={d.id} className="card difficulty-card">
                     <h3>{d.label}</h3>
                     <p className="muted small">{d.range}</p>
                     <button className="btn btn-primary" disabled={starting} onClick={() => start(d.id)}>
-                      {active ? "Retomar" : "Começar"}
+                      {resumable ? `Retomar (${active.done}/${active.total})` : "Começar"}
                     </button>
-                    {active && (
+                    {active && !resumable && (
+                      <p className="muted tiny">Começar com outro ritmo encerra a sessão em andamento desta dificuldade.</p>
+                    )}
+                    {resumable && (
                       <button
                         className="link small"
                         disabled={starting}
-                        onClick={() => window.confirm("Começar do início com novas lacunas? O histórico continua salvo.") && start(d.id, "normal", true)}
+                        onClick={() =>
+                          window.confirm("Começar do início? As lacunas continuam as mesmas e o histórico fica salvo.") &&
+                          start(d.id, "normal", true)
+                        }
                       >
-                        Recomeçar
+                        Recomeçar do início
                       </button>
                     )}
                   </div>

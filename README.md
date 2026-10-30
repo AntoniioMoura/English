@@ -166,8 +166,11 @@ Especificação em [especificacao_listening_videos.md](especificacao_listening_v
 - **Cache:** a preparação acontece só na primeira abertura e fica em `backend/data/listening/<id>/` + banco. Só é refeita
   se o conteúdo do arquivo (fingerprint: tamanho + hash do início/fim) ou a `PIPELINE_VERSION` mudarem. Vídeo que o
   navegador não toca (MKV, HEVC, áudio AC3…) ganha uma cópia MP4 H.264/AAC; o original nunca é alterado.
-- **Exercício:** lacunas sorteadas por sessão (Iniciante 10–15%, Fácil 25–30%, Médio 40–45%, Difícil 60%), gravadas na
-  sessão (recarregar não muda nada) e com peso maior para palavras que você já errou. Comparação ignora só
+- **Ritmo:** o vídeo corre com a legenda completa e para só numa frase-exercício a cada ~15 s, ~30 s (padrão) ou
+  ~1 min — ou em todas as frases. Em cada janela entra a frase mais adequada (tamanho médio, palavras de verdade).
+- **Exercício:** lacunas por dificuldade (Iniciante 10–15%, Fácil 25–30%, Médio 40–45%, Difícil 60%), sorteadas na
+  primeira vez com peso maior para palavras que você já errou e **fixas** depois disso (recomeçar repete as mesmas);
+  cada dificuldade tem as suas. *Mostrar resposta* revela a frase inteira e toca de novo (conta como ajuda). Comparação ignora só
   maiúsculas, apóstrofo tipográfico e pontuação das pontas (`dont` ≠ `don't`). Erro conta ao conferir, não por tecla;
   revelar registra ajuda (não é acerto); repetições são contadas sem punir.
 - **Correções:** *Corrigir legendas* edita texto, horários e tradução de cada fala sem transcrever de novo. No player,
