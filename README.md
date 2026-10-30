@@ -32,7 +32,8 @@ Especificações: [english_builder_especificacao.md](english_builder_especificac
 ## Como usar
 
 Requisitos: Python 3.11+, Node 18+ e [Ollama](https://ollama.com) com um modelo instalado
-(padrão: `qwen3:8b`, ajustável pela API `PUT /api/settings/ollama`).
+(padrão: `qwen3:8b`, ajustável pela API `PUT /api/settings/ollama`). O Listening com vídeos usa também o
+[FFmpeg](https://ffmpeg.org) (`winget install Gyan.FFmpeg`).
 
 No Windows, dê duplo clique em **`Iniciar English Builder.bat`** (ou rode `.\start.ps1`).
 
@@ -138,6 +139,41 @@ agendador substituível em [domain/scheduler.py](backend/app/domain/scheduler.py
   - Qualquer outro erro → **uma revisão da mesma frase**, que volta idêntica (sem IA) até você acertar.
   - Errou a revisão: volta na hora para o fim da fila de hoje. Acertou: 1-3-7-14-30 dias, encurtados 15% por
     erro acumulado (mínimo 30%). "Estável" só após 3 acertos em 3 dias diferentes.
+
+## Listening com vídeos
+
+Especificação em [especificacao_listening_videos.md](especificacao_listening_videos.md). Rotas em `/api/listening/*`
+([listening_routes.py](backend/app/api/listening_routes.py)); regras de lacunas e comparação em
+[domain/listening.py](backend/app/domain/listening.py); catálogo e preparação em
+[services/listening_media.py](backend/app/services/listening_media.py).
+
+- **Vídeos:** coloque `.mp4`, `.mkv`, `.mov` ou `.webm` em `videos/` (subpastas viram categorias) e clique em
+  *Atualizar catálogo*. Miniatura e duração vêm do FFmpeg em segundo plano. Arquivo movido/renomeado é reconhecido
+  pelo conteúdo; arquivo removido fica como "ausente" e o histórico é mantido.
+- **Baixar do YouTube:** botão no catálogo; cole o link, escolha a categoria (subpasta, padrão `YouTube`) e a qualidade.
+  Usa [yt-dlp](https://github.com/yt-dlp/yt-dlp) (no `requirements.txt`) com o Node ou Deno instalado como runtime
+  JavaScript. Prefere H.264 + AAC (sem conversão), baixa só legendas feitas pelo autor em inglês/português (as
+  automáticas do YouTube repetem linhas; sem legenda, o Whisper transcreve) e já deixa o vídeo preparado. O download
+  acontece numa pasta temporária, então o catálogo nunca vê arquivos parciais. Se o YouTube mudar algo e o download
+  falhar, atualize: `backend\.venv\Scripts\pip install -U yt-dlp`.
+- **Requisitos extras:** FFmpeg (`winget install Gyan.FFmpeg`) e, para vídeos sem legenda,
+  [faster-whisper](https://github.com/SYSTRAN/faster-whisper) (já no `requirements.txt`; modelo padrão `large-v3`,
+  ajustável em `PATCH /api/listening/settings`). Para usar a GPU NVIDIA no Windows:
+  `backend\.venv\Scripts\pip install -r backend\requirements-gpu.txt`. Sem GPU, a transcrição roda na CPU.
+- **Legendas, por prioridade:** `nome.en.srt`/`.vtt` ao lado do vídeo (`nome.srt` sem idioma vale se o texto for
+  inglês) → faixa de legenda em inglês embutida → transcrição local com Whisper. Legenda em português
+  (`nome.pt-BR.srt` ou embutida) vira a tradução opcional.
+- **Cache:** a preparação acontece só na primeira abertura e fica em `backend/data/listening/<id>/` + banco. Só é refeita
+  se o conteúdo do arquivo (fingerprint: tamanho + hash do início/fim) ou a `PIPELINE_VERSION` mudarem. Vídeo que o
+  navegador não toca (MKV, HEVC, áudio AC3…) ganha uma cópia MP4 H.264/AAC; o original nunca é alterado.
+- **Exercício:** lacunas sorteadas por sessão (Iniciante 10–15%, Fácil 25–30%, Médio 40–45%, Difícil 60%), gravadas na
+  sessão (recarregar não muda nada) e com peso maior para palavras que você já errou. Comparação ignora só
+  maiúsculas, apóstrofo tipográfico e pontuação das pontas (`dont` ≠ `don't`). Erro conta ao conferir, não por tecla;
+  revelar registra ajuda (não é acerto); repetições são contadas sem punir.
+- **Correções:** *Corrigir legendas* edita texto, horários e tradução de cada fala sem transcrever de novo. No player,
+  "A legenda não corresponde ao áudio" pula a fala e a sinaliza para correção.
+- **Painel:** acerto por vídeo e dificuldade, onde você parou, palavras mais erradas (erros/tentativas), evolução por
+  sessão e revisão dos trechos errados (reaproveita os trechos e foca nas palavras erradas).
 
 ## Próximos passos
 

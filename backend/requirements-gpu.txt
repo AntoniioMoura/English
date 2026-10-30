@@ -1,0 +1,4 @@
+# Bibliotecas CUDA para a transcrição do Listening rodar na GPU NVIDIA (Windows/Linux).
+# Opcional: sem elas o faster-whisper usa a CPU. ~1 GB de download.
+nvidia-cublas-cu12
+nvidia-cudnn-cu12>=9,<10

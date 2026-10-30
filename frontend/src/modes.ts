@@ -30,6 +30,15 @@ export const MENU: MenuEntry[] = [
     accent: "violet",
   },
   {
+    id: "listening",
+    title: "Listening com vídeos",
+    description: "Assista aos seus vídeos em inglês e complete as palavras que faltam nas legendas.",
+    path: "/listening",
+    icon: "🎧",
+    kind: "study_mode",
+    accent: "green",
+  },
+  {
     id: "reports",
     title: "Gerar relatório completo",
     description: "Criador de frases + Anki Premium: evolução, erros recorrentes e exportação em Markdown.",

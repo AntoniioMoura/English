@@ -13,8 +13,14 @@ if (-not (Test-Path $python)) {
     & $python -m pip install -q -r (Join-Path $backend "requirements.txt")
 }
 
-if (-not (Test-Path (Join-Path $frontend "dist\index.html"))) {
-    Write-Host "Gerando a interface (primeira execução)..."
+$dist = Join-Path $frontend "dist\index.html"
+$stale = -not (Test-Path $dist)
+if (-not $stale) {
+    $built = (Get-Item $dist).LastWriteTime
+    $stale = [bool](Get-ChildItem (Join-Path $frontend "src") -Recurse -File | Where-Object { $_.LastWriteTime -gt $built } | Select-Object -First 1)
+}
+if ($stale) {
+    Write-Host "Gerando a interface..."
     Push-Location $frontend
     npm install --no-audit --no-fund
     npm run build

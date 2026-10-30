@@ -1,8 +1,13 @@
-import { Link, NavLink, Route, Routes } from "react-router-dom";
+import { Link, NavLink, Route, Routes, useLocation } from "react-router-dom";
 import { OllamaBadge } from "./components/OllamaBadge";
 import { ExercisePage } from "./pages/ExercisePage";
 import { FramePicker } from "./pages/FramePicker";
 import { Home } from "./pages/Home";
+import { ListeningEditor } from "./pages/listening/ListeningEditor";
+import { ListeningLibrary } from "./pages/listening/ListeningLibrary";
+import { ListeningPlayer } from "./pages/listening/ListeningPlayer";
+import { ListeningStats } from "./pages/listening/ListeningStats";
+import { ListeningVideo } from "./pages/listening/ListeningVideo";
 import { Progress } from "./pages/Progress";
 import { RecallHistory } from "./pages/recall/RecallHistory";
 import { RecallHome } from "./pages/recall/RecallHome";
@@ -12,6 +17,8 @@ import { RecallWords } from "./pages/recall/RecallWords";
 import { Reports } from "./pages/Reports";
 
 export default function App() {
+  // Catálogo e player de vídeo pedem uma área mais larga que as telas de texto.
+  const wide = useLocation().pathname.startsWith("/listening");
   return (
     <div className="app">
       <header className="topbar">
@@ -24,11 +31,12 @@ export default function App() {
         <nav>
           <NavLink to="/builder">Criador de frases</NavLink>
           <NavLink to="/recall">Anki Premium</NavLink>
+          <NavLink to="/listening">Listening</NavLink>
           <NavLink to="/reports">Relatórios</NavLink>
         </nav>
         <OllamaBadge />
       </header>
-      <main className="content">
+      <main className={wide ? "content content-wide" : "content"}>
         <Routes>
           <Route path="/" element={<Home />} />
           <Route path="/builder" element={<FramePicker />} />
@@ -38,6 +46,11 @@ export default function App() {
           <Route path="/recall/review" element={<RecallReview />} />
           <Route path="/recall/words" element={<RecallWords />} />
           <Route path="/recall/history" element={<RecallHistory />} />
+          <Route path="/listening" element={<ListeningLibrary />} />
+          <Route path="/listening/stats" element={<ListeningStats />} />
+          <Route path="/listening/video/:id" element={<ListeningVideo />} />
+          <Route path="/listening/video/:id/edit" element={<ListeningEditor />} />
+          <Route path="/listening/session/:id" element={<ListeningPlayer />} />
           <Route path="/progress" element={<Progress />} />
           <Route path="/reports" element={<Reports />} />
           <Route path="*" element={<p>Página não encontrada.</p>} />

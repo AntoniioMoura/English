@@ -6,8 +6,9 @@ frontend/node_modules/
 # Build da interface (gerado por `npm run build`)
 frontend/dist/
 
-# Dados pessoais de estudo (banco SQLite local)
+# Dados pessoais de estudo (banco SQLite local, cache do Listening) e vídeos do usuário
 backend/data/
+videos/
 
 # Caches
 __pycache__/
