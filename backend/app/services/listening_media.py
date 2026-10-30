@@ -34,7 +34,7 @@ log = logging.getLogger(__name__)
 
 VIDEO_EXTS = {".mp4", ".mkv", ".mov", ".webm"}
 # Suba quando a forma de gerar trechos/versão compatível mudar: invalida o cache de todos os vídeos.
-PIPELINE_VERSION = 3  # 2: legendas ressincronizadas pelo áudio; 3: palavras conferidas com o áudio
+PIPELINE_VERSION = 4  # 2: ressincronia pelo áudio; 3: palavras conferidas com o áudio; 4: fala sobreposta não corta a anterior
 HASH_CHUNK = 1024 * 1024
 
 

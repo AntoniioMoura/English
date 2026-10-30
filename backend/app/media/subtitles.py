@@ -148,16 +148,24 @@ def align_to_words(cues: list[Cue], spoken: list[tuple[str, float, float]], min_
             audio[ci][wi] = status
 
     aligned: list[Cue] = []
+    spoken_end: list[float | None] = []  # fim da última palavra realmente ouvida de cada fala
     for ci, (cue, (first, last)) in enumerate(zip(cues, ranges)):
         matched = [i for i in range(first, last) if i in pairs]
-        start, end = cue.start, cue.end
+        start, end, heard_end = cue.start, cue.end, None
         if matched:
             new_start = spoken[pairs[matched[0]]][1] - UNMATCHED_WORD * (matched[0] - first)
             new_end = spoken[pairs[matched[-1]]][2] + UNMATCHED_WORD * (last - 1 - matched[-1])
             if abs(new_start - cue.start) <= MAX_SHIFT:
                 start, end = max(new_start - LEAD_IN, 0.0), new_end + TAIL
+                heard_end = spoken[pairs[matched[-1]]][2]
+        # Palavras iniciais não reconhecidas (fala sobreposta) puxam o início para trás por estimativa;
+        # essa estimativa nunca pode passar por cima de palavras já confirmadas na fala anterior.
+        previous_heard = next((e for e in reversed(spoken_end) if e is not None), None)
+        if previous_heard is not None and start < previous_heard:
+            start = min(previous_heard, end - 0.3) if heard_end is None else min(previous_heard, heard_end - 0.05)
         aligned.append(Cue(start, max(end, start + 0.3), cue.text, audio=audio[ci]))
-    for cur, nxt in zip(aligned, aligned[1:]):  # não invade a fala seguinte
-        if cur.start < nxt.start < cur.end:
-            cur.end = max(nxt.start, cur.start + 0.3)
+        spoken_end.append(heard_end)
+    for cur, nxt, heard_end in zip(aligned, aligned[1:], spoken_end):  # não invade a fala seguinte...
+        if cur.start < nxt.start < cur.end:  # ...mas nunca corta uma palavra ouvida desta fala
+            cur.end = max(nxt.start, heard_end or 0.0, cur.start + 0.3)
     return aligned

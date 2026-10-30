@@ -114,7 +114,7 @@ def test_subtitles_are_resynced_by_spoken_words():
     out = subtitles.align_to_words(cues, spoken)
     assert out[0].start == 0.0 and out[0].text == "-Thank you so much for being here."
     assert abs(out[1].start - 2.34) < 1e-6 and out[0].end <= out[1].start
-    assert abs(out[2].start - 3.8) < 1e-6
+    assert abs(out[2].start - 3.88) < 1e-6  # não entra no "show." da fala anterior (termina em 3,88)
     assert (out[3].start, out[3].end) == (40.0, 41.0)  # sem palavra pareada: horário original
     # áudio que não corresponde à legenda: nada muda
     assert subtitles.align_to_words(cues, [("bonjour", 0.0, 0.5), ("merci", 0.6, 1.0)]) == cues
@@ -506,3 +506,17 @@ def test_sessions_never_hide_unheard_words_or_names_and_history_ignores_them(lcl
     conn.close()
     panel = lclient.get("/api/listening/stats").json()
     assert "lilies" not in {w["word"] for w in panel["words"]}
+
+
+def test_overlapping_speech_never_cuts_heard_words_of_the_previous_line():
+    # caso real: "-Yeah. -It comes out next month." começa com fala sobreposta que o Whisper não separa;
+    # a estimativa do início dela não pode cortar o "Press Play" da fala anterior
+    cues = [Cue(114.381, 116.416, 'by the way, you have a new EP, "Press Play."'),
+            Cue(116.416, 118.151, "-Yeah. -It comes out next month.")]
+    spoken = [("by", 114.28, 114.38), ("the", 114.38, 114.50), ("way.", 114.50, 114.56), ("You", 114.56, 114.70),
+              ("have", 114.70, 114.82), ("a", 114.82, 114.90), ("new", 114.90, 115.06), ("EP,", 115.06, 115.32),
+              ("Press", 115.50, 115.78), ("Play,", 115.78, 116.12), ("comes", 116.30, 116.74), ("out", 116.74, 116.90),
+              ("next", 116.90, 117.08), ("month.", 117.08, 117.48)]
+    first, second = subtitles.align_to_words(cues, spoken)
+    assert first.end >= 116.12  # o "Play" inteiro toca
+    assert second.start >= 116.12 - 0.05 and second.end >= 117.48
