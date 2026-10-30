@@ -74,12 +74,13 @@ def _read_wav(path: Path):
 
 def _run(model, samples, total: float, on_progress: Callable[[float], None] | None) -> list[Cue]:
     segments, _info = model.transcribe(samples, language="en", vad_filter=True, beam_size=5,
-                                       condition_on_previous_text=False)
+                                       condition_on_previous_text=False, word_timestamps=True)
     cues = []
     for seg in segments:  # gerador: a transcrição acontece durante a iteração
         text = seg.text.strip()
         if text:
-            cues.append(Cue(float(seg.start), float(seg.end), text))
+            spoken = [(w.word.strip(), float(w.start), float(w.end)) for w in seg.words or []]
+            cues.append(Cue(float(seg.start), float(seg.end), text, spoken))
         if on_progress and total:
             on_progress(min(seg.end / total, 1.0))
     return cues

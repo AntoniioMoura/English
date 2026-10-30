@@ -36,6 +36,15 @@ Não sei o que você estava pensando.
 needs_ffmpeg = pytest.mark.skipif(not ffmpeg.available(), reason="FFmpeg não instalado")
 
 
+@pytest.fixture(autouse=True)
+def no_real_whisper(monkeypatch):
+    """Nos testes o Whisper nunca roda de verdade; sem simulação, a sincronização falha e fica o horário original."""
+    def unavailable(*a, **k):
+        raise transcriber.TranscriptionError("Whisper desligado nos testes")
+
+    monkeypatch.setattr(transcriber, "transcribe", unavailable)
+
+
 # ---------- regras ----------
 
 def test_parts_keep_contractions_and_skip_sound_descriptions():
@@ -92,6 +101,23 @@ def test_subtitle_parsing_and_translation_alignment():
     assert vtt[0].start == 1.0 and vtt[0].end == 2.5 and vtt[0].text == "Hello there friend"
     aligned = subtitles.align_translation(cues, subtitles.parse(PT_SRT))
     assert aligned[0] == "Nunca perde a graça, né?" and aligned[2] is None
+
+
+def test_subtitles_are_resynced_by_spoken_words():
+    # caso real (YouTube): a legenda entra 1,2 s depois do "Thank you" e o atraso varia por fala
+    cues = [Cue(1.201, 2.769, "-Thank you so much for being here."), Cue(2.769, 3.871, "Welcome, welcome, welcome to the show."),
+            Cue(3.871, 5.205, "Congrats."), Cue(40.0, 41.0, "Totally different words here")]
+    spoken = [("Thank", 0.0, 0.4), ("you", 0.48, 0.7), ("so", 0.76, 0.95), ("much", 1.0, 1.3), ("for", 1.34, 1.5),
+              ("being", 1.56, 1.8), ("here.", 1.82, 2.1), ("Welcome,", 2.44, 2.9), ("welcome,", 3.04, 3.3),
+              ("welcome", 3.32, 3.45), ("to", 3.48, 3.6), ("the", 3.66, 3.7), ("show.", 3.72, 3.88),
+              ("Congrats.", 3.9, 4.2)]
+    out = subtitles.align_to_words(cues, spoken)
+    assert out[0].start == 0.0 and out[0].text == "-Thank you so much for being here."
+    assert abs(out[1].start - 2.34) < 1e-6 and out[0].end <= out[1].start
+    assert abs(out[2].start - 3.8) < 1e-6
+    assert (out[3].start, out[3].end) == (40.0, 41.0)  # sem palavra pareada: horário original
+    # áudio que não corresponde à legenda: nada muda
+    assert subtitles.align_to_words(cues, [("bonjour", 0.0, 0.5), ("merci", 0.6, 1.0)]) == cues
 
 
 def test_english_detection():
@@ -164,13 +190,19 @@ def test_external_subtitle_is_used_and_ready_video_is_not_reprocessed(lclient, v
     (videos / "ep.en.srt").write_text(SRT, encoding="utf-8")
     (videos / "ep.pt-BR.srt").write_text(PT_SRT, encoding="utf-8")
     vid = scan(lclient)["videos"][0]["id"]
-    monkeypatch.setattr(transcriber, "transcribe", lambda *a, **k: pytest.fail("não deveria transcrever"))
+    heard = [Cue(0.0, 1.2, "Never gets old huh", [("Never", 0.0, 0.3), ("gets", 0.35, 0.6), ("old", 0.65, 0.9),
+                                                    ("huh", 0.95, 1.2)]),
+             Cue(1.7, 2.6, "I don't know what you were thinking",
+                 [(w, 1.7 + 0.12 * i, 1.8 + 0.12 * i) for i, w in enumerate("I don't know what you were thinking".split())])]
+    monkeypatch.setattr(transcriber, "transcribe", lambda *a, **k: heard)  # Whisper só mede o tempo das palavras
 
     video = prepare(lclient, vid)
     assert video["status"] == "ready" and video["subtitle_source"] == "external" and video["has_translation"]
     assert video["converted"] is False  # MP4 H.264/AAC toca como está
     segs = lclient.get(f"/api/listening/videos/{vid}/segments").json()
     assert segs[1]["text"] == "I don't know what you were thinking."
+    assert segs[0]["start"] == 0.0 and segs[0]["text"] == "Never gets old, huh?"  # ressincronizada (era 0,2 s)
+    assert abs(segs[1]["start"] - 1.6) < 1e-6
     assert segs[0]["translation_pt"] == "Nunca perde a graça, né?"
 
     calls = []

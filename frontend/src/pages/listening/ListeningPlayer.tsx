@@ -37,17 +37,22 @@ export function ListeningPlayer() {
 
   // ---------- vídeo ----------
 
-  const tick = useCallback(() => {
+  // Pausa no fim do trecho. Devolve true se pausou.
+  const checkStop = useCallback(() => {
     const video = videoRef.current;
-    if (!video) return;
+    if (!video) return true;
     setTime(video.currentTime);
     if (stopAt.current != null && video.currentTime >= stopAt.current) {
       video.pause();
       stopAt.current = null;
-      return;
+      return true;
     }
-    if (!video.paused) requestAnimationFrame(tick);
+    return false;
   }, []);
+
+  const tick = useCallback(() => {
+    if (!checkStop() && !videoRef.current?.paused) requestAnimationFrame(tick);
+  }, [checkStop]);
 
   const playSegment = useCallback(async (it: SessionItem) => {
     const video = videoRef.current;
@@ -283,6 +288,7 @@ export function ListeningPlayer() {
             requestAnimationFrame(tick);
           }}
           onPause={() => setPlaying(false)}
+          onTimeUpdate={checkStop} // garantia: requestAnimationFrame para quando a aba fica em segundo plano
           onClick={togglePlay}
           onLoadedMetadata={() => item && !playing && videoRef.current && (videoRef.current.currentTime = Math.max(item.start - PREROLL, 0))}
           onError={() => setError("O navegador não conseguiu reproduzir este vídeo. Tente prepará-lo novamente.")}

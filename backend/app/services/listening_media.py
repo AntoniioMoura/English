@@ -34,7 +34,7 @@ log = logging.getLogger(__name__)
 
 VIDEO_EXTS = {".mp4", ".mkv", ".mov", ".webm"}
 # Suba quando a forma de gerar trechos/versão compatível mudar: invalida o cache de todos os vídeos.
-PIPELINE_VERSION = 1
+PIPELINE_VERSION = 2  # 2: legendas ressincronizadas pelo áudio
 HASH_CHUNK = 1024 * 1024
 
 
@@ -242,31 +242,41 @@ def prepare(conn: sqlite3.Connection, video_id: int, videos_dir: Path, cache_dir
         plan = ffmpeg.playback_plan(path, info)
 
         found = _english_subtitles(path, info, work)
-        transcribed = found is None
-        span = (0.05, 0.75) if transcribed else (0.05, 0.10)
-        if found:
-            cues, source = found
-        else:
-            progress("Extraindo o áudio", 0.04, force=True)
-            audio = work / "audio.wav"
-            stream = ffmpeg.choose_audio_stream(info)
+        stream = ffmpeg.choose_audio_stream(info)
+        sync = found is not None and stream is not None and transcriber.available()
+        span = (0.05, 0.75) if found is None or sync else (0.05, 0.10)
+        translation = _portuguese_subtitles(path, info, work)
+
+        def listen(label: str) -> list[Cue]:
             if stream is None:
                 raise MediaError("O vídeo não tem áudio nem legenda em inglês.")
+            progress("Extraindo o áudio", 0.04, force=True)
+            audio = work / "audio.wav"
             ffmpeg.extract_audio(path, audio, stream["index"])
-            progress("Transcrevendo o áudio (Whisper)", span[0], force=True)
+            progress(label, span[0], force=True)
             try:
-                cues = transcriber.transcribe(
-                    audio, duration, settings.whisper_model, settings.whisper_device,
-                    lambda p: progress("Transcrevendo o áudio (Whisper)", span[0] + p * (span[1] - span[0])))
+                return transcriber.transcribe(audio, duration, settings.whisper_model, settings.whisper_device,
+                                              lambda p: progress(label, span[0] + p * (span[1] - span[0])))
             finally:
                 audio.unlink(missing_ok=True)
+
+        if found:
+            cues, source = found
+            # a tradução tem o mesmo atraso da legenda original: pareia antes de ressincronizar
+            aligned = subtitles.align_translation(cues, translation[0]) if translation else [None] * len(cues)
+            if sync:
+                try:
+                    heard = listen("Sincronizando a legenda com o áudio (Whisper)")
+                    cues = subtitles.align_to_words(cues, [w for c in heard for w in c.words or []])
+                except TranscriptionError as exc:  # sem sincronia, fica o horário da legenda
+                    log.warning("sincronização da legenda de %s: %s", video["rel_path"], exc)
+        else:
+            cues = listen("Transcrevendo o áudio (Whisper)")
             source = "whisper"
+            aligned = subtitles.align_translation(cues, translation[0]) if translation else [None] * len(cues)
         if not cues:
             raise MediaError("Nenhuma fala em inglês foi encontrada neste vídeo.")
         (work / "subtitles.en.srt").write_text(subtitles.to_srt(cues), encoding="utf-8")
-
-        translation = _portuguese_subtitles(path, info, work)
-        aligned = subtitles.align_translation(cues, translation[0]) if translation else [None] * len(cues)
 
         playback_path = None
         if plan != "original":
