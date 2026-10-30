@@ -34,7 +34,7 @@ log = logging.getLogger(__name__)
 
 VIDEO_EXTS = {".mp4", ".mkv", ".mov", ".webm"}
 # Suba quando a forma de gerar trechos/versão compatível mudar: invalida o cache de todos os vídeos.
-PIPELINE_VERSION = 2  # 2: legendas ressincronizadas pelo áudio
+PIPELINE_VERSION = 3  # 2: legendas ressincronizadas pelo áudio; 3: palavras conferidas com o áudio
 HASH_CHUNK = 1024 * 1024
 
 
@@ -295,7 +295,8 @@ def prepare(conn: sqlite3.Connection, video_id: int, videos_dir: Path, cache_dir
             except MediaError:
                 pass
 
-        segments = [{"start": c.start, "end": c.end, "text": c.text, "translation_pt": t}
+        segments = [{"start": c.start, "end": c.end, "text": c.text, "translation_pt": t,
+                     "word_audio": json.dumps(c.audio) if c.audio else None}
                     for c, t in zip(cues, aligned)]
         current = repo.get_video(conn, video_id)
         rev = current["processing_rev"] + 1

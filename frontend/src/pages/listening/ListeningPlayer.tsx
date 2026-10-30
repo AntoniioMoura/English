@@ -406,7 +406,15 @@ export function ListeningPlayer() {
         <section className={`sentence-area ${item.status !== "pending" ? "sentence-done" : ""}`}>
           <p className="sentence" aria-live="polite">
             {item.parts.map((part, n) => {
-              if (part.blank === null) return <span key={n}>{part.text}</span>;
+              if (part.blank === null) {
+                return part.unheard ? (
+                  <span key={n} className="word-unheard" title="Está na legenda, mas não é dito no áudio">
+                    {part.text}
+                  </span>
+                ) : (
+                  <span key={n}>{part.text}</span>
+                );
+              }
               const blank = item.blanks[part.blank];
               if (blank.state === "correct" || blank.state === "revealed" || part.text !== null) {
                 return (
@@ -437,6 +445,9 @@ export function ListeningPlayer() {
               );
             })}
           </p>
+          {item.parts.some((p) => p.unheard) && (
+            <p className="muted tiny center-text">Palavras riscadas estão na legenda, mas não são ditas no áudio.</p>
+          )}
           {showTranslation && (
             <p className="translation">{translationAvailable ? item.translation_pt : "Sem tradução para esta fala."}</p>
           )}

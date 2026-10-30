@@ -216,6 +216,8 @@ def update_segment(conn: sqlite3.Connection, segment_id: int, changes: dict) -> 
     if "flagged" in fields:
         fields["flagged"] = int(bool(fields["flagged"]))
     changed_text = "text" in fields and fields["text"] != segment["text"]
+    if changed_text:
+        fields["word_audio"] = None  # corrigido por você: o texto passa a ser a referência
     if any(fields.get(k, segment[k]) != segment[k] for k in ("text", "start", "end")):
         fields["edited"] = 1
         fields.setdefault("flagged", 0)  # corrigido: deixa de estar sinalizado
@@ -234,8 +236,44 @@ def _refresh_pending_items(conn: sqlite3.Connection, segment_id: int, text: str)
            WHERE i.segment_id = ? AND i.status = 'pending' AND s.status = 'active'
              AND NOT EXISTS (SELECT 1 FROM listening_word_attempts a WHERE a.item_id = i.id)""", (segment_id,))
     for r in rows.fetchall():
-        blanks = rules.choose_blanks(text, r["difficulty"], _segment_rng(r["video_id"], r["difficulty"], segment_id))
+        allowed = rules.hideable_words(text, _names(conn, r["video_id"]))
+        blanks = rules.choose_blanks(text, r["difficulty"], _segment_rng(r["video_id"], r["difficulty"], segment_id),
+                                     allowed=allowed)
         repo.update_item(conn, r["id"], {"text_snapshot": text, "blanks": blanks})
+
+
+# ---------- palavras que contam ----------
+
+def _names(conn: sqlite3.Connection, video_id: int) -> set[str]:
+    """Nomes e termos de nicho do vídeo (Lilies, BLINKs): nunca viram lacuna nem erro para revisar."""
+    return rules.proper_names([s["text"] for s in repo.active_segments(conn, video_id)])
+
+
+def _word_audio(raw: str | None) -> list[str | None] | None:
+    return json.loads(raw) if raw else None
+
+
+def _allowed(segment: dict, names: set[str]) -> set[int]:
+    return rules.hideable_words(segment["text"], names, _word_audio(segment.get("word_audio")))
+
+
+class _WordFilter:
+    """Decide se uma tentativa registrada conta no histórico (nomes e palavras não faladas não contam)."""
+
+    def __init__(self, conn: sqlite3.Connection):
+        self.conn = conn
+        self.names: dict[int, set[str]] = {}
+        self.allowed: dict[tuple[int, str], set[int]] = {}
+
+    def counts(self, attempt: dict, segment_text: str, word_audio: str | None) -> bool:
+        vid = attempt["video_id"]
+        if vid not in self.names:
+            self.names[vid] = _names(self.conn, vid)
+        key = (attempt["segment_id"], attempt["segment_text"])
+        if key not in self.allowed:
+            audio = _word_audio(word_audio) if segment_text == attempt["segment_text"] else None
+            self.allowed[key] = rules.hideable_words(attempt["segment_text"], self.names[vid], audio)
+        return attempt["word_index"] in self.allowed[key]
 
 
 # ---------- sessões ----------
@@ -248,17 +286,19 @@ def _segment_rng(video_id: int, difficulty: str, segment_id: int) -> random.Rand
 def _segments_to_review(conn: sqlite3.Connection, video_id: int) -> dict[int, set[str]]:
     """Trechos cuja última conclusão teve erro ou ajuda → palavras a focar na revisão."""
     rows = conn.execute(
-        """SELECT i.id, i.segment_id FROM listening_session_items i
+        """SELECT i.id, i.segment_id, g.text, g.word_audio FROM listening_session_items i
            JOIN listening_sessions s ON s.id = i.session_id
            JOIN listening_segments g ON g.id = i.segment_id
            WHERE s.video_id = ? AND g.active = 1 AND i.status = 'done'
            ORDER BY i.completed_at, i.id""", (video_id,))
-    last_item: dict[int, int] = {}
+    last_item: dict[int, dict] = {}
     for r in rows:
-        last_item[r["segment_id"]] = r["id"]
+        last_item[r["segment_id"]] = dict(r)
+    words = _WordFilter(conn)
     result: dict[int, set[str]] = {}
-    for segment_id, item_id in last_item.items():
-        missed = {a["expected_norm"] for a in repo.attempts_for_item(conn, item_id) if not a["is_correct"]}
+    for segment_id, row in last_item.items():
+        missed = {a["expected_norm"] for a in repo.attempts_for_item(conn, row["id"])
+                  if not a["is_correct"] and words.counts(a, row["text"], row["word_audio"])}
         if missed:
             result[segment_id] = missed
     return result
@@ -304,7 +344,9 @@ def start_session(conn: sqlite3.Connection, video_id: int, difficulty: str, mode
         return session_state(conn, existing["id"])
 
     focus = _segments_to_review(conn, video_id) if mode == "review" else {}
-    segs = [s for s in repo.active_segments(conn, video_id) if not s["flagged"]]
+    names = _names(conn, video_id)
+    segs = [{**s, "allowed": _allowed(s, names), "word_audio": _word_audio(s["word_audio"])}
+            for s in repo.active_segments(conn, video_id) if not s["flagged"]]
     if mode == "review":
         segs = [s for s in segs if s["id"] in focus]
         if not segs:
@@ -317,11 +359,11 @@ def start_session(conn: sqlite3.Connection, video_id: int, difficulty: str, mode
     items = []
     for s in segs:
         reuse = previous.get(s["id"])
-        if reuse and reuse[0] == s["text"]:
+        if reuse and reuse[0] == s["text"] and set(reuse[1]) <= s["allowed"]:
             blanks = reuse[1]
         else:
             blanks = rules.choose_blanks(s["text"], difficulty, _segment_rng(video_id, difficulty, s["id"]),
-                                         history, focus.get(s["id"]))
+                                         history, focus.get(s["id"]), allowed=s["allowed"])
         if blanks:  # trecho sem palavra adequada (só [MUSIC], números) não vira exercício
             items.append({"segment_id": s["id"], "text": s["text"], "blanks": blanks})
     if not items:
@@ -363,13 +405,16 @@ def item_state(item: dict, attempts: list[dict]) -> dict:
     blanks = _blank_states(item, attempts)
     by_word = {b["word_index"]: b for b in blanks}
     finished = item["status"] != "pending"
+    audio = _word_audio(item.get("word_audio")) if item["text_snapshot"] == item["segment_text"] else None
     parts = []
     for p in rules.split_parts(item["text_snapshot"]):
         b = by_word.get(p.word_index) if p.word_index is not None else None
         if b:
             parts.append({"text": b["answer"] if b["answer"] is not None else None, "blank": b["blank"]})
         else:
-            parts.append({"text": p.text, "blank": None})
+            unheard = bool(audio and p.word_index is not None and p.word_index < len(audio)
+                           and audio[p.word_index] == "unheard")
+            parts.append({"text": p.text, "blank": None, "unheard": unheard})
     return {
         "id": item["id"],
         "position": item["position"],
@@ -604,15 +649,22 @@ def stats(conn: sqlite3.Connection) -> dict:
                          "segments_total": total, "stopped_at": stopped_at,
                          "to_review": len(_segments_to_review(conn, vid)) if total else 0})
 
-    words = [
-        {"word": r["word"], "attempts": r["attempts"], "errors": r["errors"], "helped": r["helped"],
-         "error_rate": r["errors"] / r["attempts"]}
-        for r in conn.execute(
-            """SELECT expected_norm AS word, COUNT(*) AS attempts, SUM(is_correct = 0) AS errors,
-                      SUM(used_help) AS helped
-               FROM listening_word_attempts GROUP BY expected_norm HAVING errors > 0
-               ORDER BY CAST(errors AS REAL) / COUNT(*) DESC, errors DESC, word LIMIT 30""")
-    ]
+    word_filter = _WordFilter(conn)
+    tally: dict[str, dict] = {}
+    for r in conn.execute(
+        """SELECT a.*, g.text AS current_text, g.word_audio FROM listening_word_attempts a
+           JOIN listening_segments g ON g.id = a.segment_id"""):
+        a = dict(r)
+        if not word_filter.counts(a, a["current_text"], a["word_audio"]):
+            continue
+        t = tally.setdefault(a["expected_norm"], {"word": a["expected_norm"], "attempts": 0, "errors": 0, "helped": 0})
+        t["attempts"] += 1
+        t["errors"] += 0 if a["is_correct"] else 1
+        t["helped"] += a["used_help"]
+    words = sorted(
+        ({**t, "error_rate": t["errors"] / t["attempts"]} for t in tally.values() if t["errors"]),
+        key=lambda t: (-t["error_rate"], -t["errors"], t["word"]),
+    )[:30]
 
     sessions = []
     for r in conn.execute(

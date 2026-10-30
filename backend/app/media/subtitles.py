@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from difflib import SequenceMatcher
 from pathlib import Path
 
-from ..domain.listening import normalize_word, split_parts, words
+from ..domain.listening import FILLERS, normalize_word, split_parts, words
 from .ffmpeg import ENGLISH_TAGS, PORTUGUESE_TAGS
 
 SUBTITLE_EXTS = (".srt", ".vtt")
@@ -20,6 +20,7 @@ class Cue:
     end: float
     text: str
     words: list[tuple[str, float, float]] | None = field(default=None, compare=False)  # só na transcrição
+    audio: list[str | None] | None = field(default=None, compare=False)  # só depois de `align_to_words`
 
 
 def _seconds(match: re.Match, offset: int) -> float:
@@ -110,27 +111,44 @@ def align_to_words(cues: list[Cue], spoken: list[tuple[str, float, float]], min_
     """Ressincroniza cada fala pelos horários das palavras ditas no áudio (texto da legenda intacto).
 
     Pareia as palavras da legenda com as reconhecidas pelo Whisper (na ordem) e usa a primeira/última
-    palavra pareada de cada fala como início/fim. Se menos de `min_match` das palavras parearem
-    (legenda de outro corte, outro idioma…), devolve as falas como estavam.
+    palavra pareada de cada fala como início/fim. Também anota, em `Cue.audio`, o que aconteceu com
+    cada palavra da legenda: "heard" (ouvida), "misheard" (havia outra palavra no lugar), "unheard"
+    (a legenda tem, a fala não — legenda "arrumada") ou "filler" (uh, um: o Whisper costuma omitir).
+    Se menos de `min_match` das palavras parearem (legenda de outro corte, outro idioma…), devolve as
+    falas como estavam.
     """
     tokens: list[str] = []
+    owners: list[tuple[int, int]] = []  # (fala, índice da palavra na fala) de cada token
     ranges: list[tuple[int, int]] = []
-    for cue in cues:
+    for ci, cue in enumerate(cues):
         first = len(tokens)
-        # [MUSIC], (laughs): não são falados, não entram no pareamento
-        tokens += [normalize_word(p.text) for p in split_parts(cue.text) if p.eligible]
+        for p in split_parts(cue.text):
+            if p.eligible:  # [MUSIC], (laughs): não são falados, não entram no pareamento
+                tokens.append(normalize_word(p.text))
+                owners.append((ci, p.word_index))
         ranges.append((first, len(tokens)))
     heard = [normalize_word(w) for w, _, _ in spoken]
     if not tokens or not heard:
         return cues
+    matcher = SequenceMatcher(None, tokens, heard, autojunk=False)
     pairs: dict[int, int] = {}
-    for a, b, size in SequenceMatcher(None, tokens, heard, autojunk=False).get_matching_blocks():
+    for a, b, size in matcher.get_matching_blocks():
         pairs.update((a + k, b + k) for k in range(size))
     if len(pairs) < min_match * len(tokens):
         return cues
 
+    audio: list[list[str | None]] = [[None] * len(words(c.text)) for c in cues]
+    labels = {"equal": "heard", "replace": "misheard", "delete": "unheard"}
+    for tag, i1, i2, _j1, _j2 in matcher.get_opcodes():
+        for i in range(i1, i2):
+            status = labels.get(tag)
+            if status == "unheard" and tokens[i] in FILLERS:
+                status = "filler"
+            ci, wi = owners[i]
+            audio[ci][wi] = status
+
     aligned: list[Cue] = []
-    for cue, (first, last) in zip(cues, ranges):
+    for ci, (cue, (first, last)) in enumerate(zip(cues, ranges)):
         matched = [i for i in range(first, last) if i in pairs]
         start, end = cue.start, cue.end
         if matched:
@@ -138,7 +156,7 @@ def align_to_words(cues: list[Cue], spoken: list[tuple[str, float, float]], min_
             new_end = spoken[pairs[matched[-1]]][2] + UNMATCHED_WORD * (last - 1 - matched[-1])
             if abs(new_start - cue.start) <= MAX_SHIFT:
                 start, end = max(new_start - LEAD_IN, 0.0), new_end + TAIL
-        aligned.append(Cue(start, max(end, start + 0.3), cue.text))
+        aligned.append(Cue(start, max(end, start + 0.3), cue.text, audio=audio[ci]))
     for cur, nxt in zip(aligned, aligned[1:]):  # não invade a fala seguinte
         if cur.start < nxt.start < cur.end:
             cur.end = max(nxt.start, cur.start + 0.3)

@@ -104,7 +104,7 @@ export interface SessionItem {
   status: "pending" | "done" | "skipped";
   replays: number;
   flagged: boolean;
-  parts: { text: string | null; blank: number | null }[];
+  parts: { text: string | null; blank: number | null; unheard?: boolean }[];
   blanks: Blank[];
   text: string | null;
   translation_pt: string | null;

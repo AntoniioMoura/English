@@ -170,7 +170,11 @@ Especificação em [especificacao_listening_videos.md](especificacao_listening_v
   ~1 min — ou em todas as frases. Em cada janela entra a frase mais adequada (tamanho médio, palavras de verdade).
 - **Exercício:** lacunas por dificuldade (Iniciante 10–15%, Fácil 25–30%, Médio 40–45%, Difícil 60%), sorteadas na
   primeira vez com peso maior para palavras que você já errou e **fixas** depois disso (recomeçar repete as mesmas);
-  cada dificuldade tem as suas. *Mostrar resposta* revela a frase inteira e toca de novo (conta como ajuda). Comparação ignora só
+  cada dificuldade tem as suas. *Mostrar resposta* revela a frase inteira e toca de novo (conta como ajuda).
+- **Fiel ao áudio:** a legenda é comparada palavra a palavra com o que o Whisper ouve. Só viram lacuna palavras
+  realmente ditas; as que a legenda tem e a fala não (legendas "arrumadas" por quem as escreveu) aparecem riscadas, e
+  frases com muitas delas não viram exercício. Nomes e termos de nicho (maiúscula no meio da frase e nunca em
+  minúscula no vídeo, ou maiúsculas misturadas: Lilies, BLINKs) nunca viram lacuna nem entram no histórico de erros. Comparação ignora só
   maiúsculas, apóstrofo tipográfico e pontuação das pontas (`dont` ≠ `don't`). Erro conta ao conferir, não por tecla;
   revelar registra ajuda (não é acerto); repetições são contadas sem punir.
 - **Correções:** *Corrigir legendas* edita texto, horários e tradução de cada fala sem transcrever de novo. No player,

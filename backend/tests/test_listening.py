@@ -444,3 +444,65 @@ def test_rhythm_blanks_are_fixed_and_context_hides_answers(lclient, videos):
     assert all(i["blanks"] == blanks[i["segment_id"]] for i in every_line["items"] if i["segment_id"] in blanks)
     hard = lclient.post(f"/api/listening/videos/{vid}/sessions", json={"difficulty": "hard", "interval": 15}).json()
     assert {i["segment_id"]: i["blanks"] for i in hard["items"]} != blanks  # outra dificuldade, outras lacunas
+
+
+# ---------- fidelidade ao áudio e nomes ----------
+
+LISA = "Uh, I have to give thanks to my Lilies and my BLINKs out there."
+
+
+def test_proper_names_and_niche_terms_are_detected():
+    texts = [LISA, '"SaWaDiKa" came out... -Oh, I got chills.', "Lilies are my fans.", "I love Thai food in Bangkok.",
+             "Thai food is the best.", "On Monday I speak English.", "It's crazy with the numbers."]
+    names = rules.proper_names(texts)
+    assert {"lilies", "blinks", "sawadika", "bangkok"} <= names
+    assert not {"i", "monday", "english", "thai", "it's", "uh", "crazy", "food"} & names  # nacionalidade é vocabulário
+
+
+def test_alignment_marks_words_the_audio_does_not_have():
+    # o que ela realmente fala (Whisper): "I have thanks to my lilies and my blings out there."
+    spoken = [(w, 45.8 + 0.3 * i, 46.0 + 0.3 * i)
+              for i, w in enumerate("I have thanks to my lilies and my blings out there.".split())]
+    out = subtitles.align_to_words([Cue(45.6, 49.6, LISA)], spoken)
+    audio = dict(zip(rules.words(LISA), out[0].audio))
+    assert audio["Uh"] == "filler" and audio["give"] == "unheard" and audio["thanks"] == "heard"
+    assert audio["BLINKs"] == "misheard"  # ouvido como "blings": falado, mas incerto
+
+    allowed = rules.hideable_words(LISA, rules.proper_names([LISA]), out[0].audio)
+    # Uh(0) to(3) give(4) Lilies(8) BLINKs(11) ficam de fora; o segundo "to" (thanks to) foi falado
+    assert allowed == {1, 2, 5, 6, 7, 9, 10, 12, 13}
+
+
+@needs_ffmpeg
+def test_sessions_never_hide_unheard_words_or_names_and_history_ignores_them(lclient, videos, monkeypatch):
+    make_video(videos / "ep.mp4")
+    (videos / "ep.en.srt").write_text(
+        "1\n00:00:00,500 --> 00:00:03,000\n" + LISA + "\n", encoding="utf-8")
+    heard = [Cue(0.5, 3.0, "I have thanks to my lilies and my blings out there.",
+                 [(w, 0.5 + 0.2 * i, 0.65 + 0.2 * i)
+                  for i, w in enumerate("I have thanks to my lilies and my blings out there.".split())])]
+    monkeypatch.setattr(transcriber, "transcribe", lambda *a, **k: heard)
+    vid = scan(lclient)["videos"][0]["id"]
+    prepare(lclient, vid)
+
+    words = rules.words(LISA)
+    forbidden = {words.index(w) for w in ("Uh", "to", "give", "Lilies", "BLINKs")}  # o primeiro "to" não é falado
+    session = lclient.post(f"/api/listening/videos/{vid}/sessions", json={"difficulty": "hard", "interval": 0}).json()
+    item = session["items"][0]
+    assert not {b["word_index"] for b in item["blanks"]} & forbidden
+    shown = {p["text"]: p.get("unheard") for p in item["parts"] if p["blank"] is None and p["text"].strip(" ,.")}
+    assert shown["give"] is True and shown["Lilies"] is False  # "give" aparece riscada
+
+    # um erro antigo em "Lilies" (de antes desta regra) some do painel e da revisão
+    from app.db import connect
+    conn = connect(lclient.app.state.db_path)
+    seg_id = item["segment_id"]
+    conn.execute(
+        """INSERT INTO listening_word_attempts (session_id, item_id, video_id, segment_id, word_index, expected,
+           expected_norm, typed, is_correct, used_help, replays, segment_start, segment_text, created_at)
+           VALUES (?, ?, ?, ?, ?, 'Lilies', 'lilies', 'lily', 0, 0, 0, 0.5, ?, '2026-10-30T00:00:00')""",
+        (session["id"], item["id"], vid, seg_id, words.index("Lilies"), LISA))
+    conn.commit()
+    conn.close()
+    panel = lclient.get("/api/listening/stats").json()
+    assert "lilies" not in {w["word"] for w in panel["words"]}

@@ -92,22 +92,94 @@ def blank_count(eligible: int, difficulty: str, rng: random.Random) -> int:
     return max(1, min(eligible, n))
 
 
+# ---------- quais palavras podem virar lacuna ----------
+
+# Hesitações: o Whisper costuma omiti-las mesmo quando são faladas, então não contam como "não ouvidas".
+FILLERS = frozenset("uh um uhm umm oh ah er erm hmm mm mhm huh".split())
+# Nomes comuns que vale a pena praticar mesmo com maiúscula.
+USEFUL_CAPITALIZED = frozenset(
+    "i i'm i'll i've i'd monday tuesday wednesday thursday friday saturday sunday january february march april "
+    "may june july august september october november december christmas god english american british "
+    "korean japanese chinese thai french spanish italian german portuguese brazilian mexican canadian "
+    "australian indian african european asian".split()
+)
+CONTRACTION_ENDINGS = ("'ll", "'re", "'ve", "'d", "'m", "n't")  # We'll no começo de uma linha da legenda
+SENTENCE_END = re.compile(r"[.!?:;\"“”\-–—♪]\s*$")
+
+
+def proper_names(texts: list[str]) -> set[str]:
+    """Nomes e termos de nicho do vídeo (Lilies, BLINKs, SaWaDiKa): não viram lacuna.
+
+    - maiúsculas misturadas no meio da palavra (BLINKs, SaWaDiKa) ou palavra toda em maiúsculas;
+    - com inicial maiúscula fora do começo da frase e nunca escrita em minúscula no vídeo.
+    """
+    capitalized_mid: set[str] = set()
+    lowercase: set[str] = set()
+    names: set[str] = set()
+    for text in texts:
+        pos = 0
+        for p in split_parts(text):
+            if p.word_index is None:
+                pos += len(p.text)
+                continue
+            word, norm = p.text, normalize_word(p.text)
+            before = text[:pos]
+            initial = not before.strip() or SENTENCE_END.search(before) is not None
+            pos += len(word)
+            if not p.eligible or norm in USEFUL_CAPITALIZED or norm.endswith(CONTRACTION_ENDINGS):
+                continue  # [CROWD CHEERS] e números não dizem nada sobre nomes
+            letters = [ch for ch in word if ch.isalpha()]
+            if (len(letters) > 1 and all(ch.isupper() for ch in letters)) or any(ch.isupper() for ch in word[1:]):
+                names.add(norm)
+            elif word[0].isupper():
+                if not initial:
+                    capitalized_mid.add(norm)
+            else:
+                lowercase.add(norm)
+    return names | (capitalized_mid - lowercase)
+
+
+def hideable_words(text: str, names: set[str], word_audio: list[str | None] | None = None) -> set[int]:
+    """Índices das palavras que podem virar lacuna: palavras de verdade, ouvidas no áudio, que não são nomes."""
+    allowed = set()
+    for p in split_parts(text):
+        if not p.eligible or normalize_word(p.text) in names:
+            continue
+        status = word_audio[p.word_index] if word_audio and p.word_index < len(word_audio) else None
+        if status in (None, "heard"):
+            allowed.add(p.word_index)
+    return allowed
+
+
+def unheard_ratio(text: str, word_audio: list[str | None] | None) -> float:
+    """Parte das palavras da legenda que não aparece no áudio (legenda "arrumada" por quem a escreveu)."""
+    if not word_audio:
+        return 0.0
+    eligible = [p for p in split_parts(text) if p.eligible]
+    if not eligible:
+        return 0.0
+    missing = sum(1 for p in eligible if p.word_index < len(word_audio) and word_audio[p.word_index] == "unheard")
+    return missing / len(eligible)
+
+
 def choose_blanks(
     text: str,
     difficulty: str,
     rng: random.Random,
     difficulty_by_word: dict[str, float] | None = None,
     focus_words: set[str] | None = None,
+    allowed: set[int] | None = None,
 ) -> list[int]:
     """Escolhe os índices das palavras ocultas.
 
     - `difficulty_by_word`: taxa de erro histórica (0–1) por palavra normalizada; aumenta a chance
       de a palavra ser escolhida, mas é um peso, não uma regra — as lacunas continuam variando.
     - `focus_words`: na revisão, as palavras erradas antes são ocultadas primeiro.
+    - `allowed`: só estes índices podem virar lacuna (ver `hideable_words`).
     """
     if difficulty not in DIFFICULTIES:
         raise ValueError(f"Dificuldade desconhecida: {difficulty}")
-    candidates = [p for p in split_parts(text) if p.eligible]
+    candidates = [p for p in split_parts(text) if p.eligible and (allowed is None or p.word_index in allowed)]
     n = blank_count(len(candidates), difficulty, rng)
     if n == 0:
         return []
@@ -135,10 +207,17 @@ INTERVALS = (0, 15, 30, 60)  # segundos entre frases-exercício; 0 = todas as fr
 MIN_EXERCISE_WORDS = 3
 
 
-def _line_score(text: str) -> float:
-    """Frases de tamanho médio, com palavras de verdade, são os melhores exercícios."""
-    n = sum(1 for p in split_parts(text) if p.eligible)
-    if n < MIN_EXERCISE_WORDS:
+MAX_UNHEARD = 0.25  # acima disso a legenda não é a fala literal: a frase não vira exercício
+
+
+def _line_score(seg: dict) -> float:
+    """Frases de tamanho médio, com palavras de verdade e fiéis ao áudio, são os melhores exercícios.
+
+    `seg` pode trazer `allowed` (índices que podem virar lacuna) e `word_audio`.
+    """
+    allowed = seg.get("allowed")
+    n = len(allowed) if allowed is not None else sum(1 for p in split_parts(seg["text"]) if p.eligible)
+    if n < MIN_EXERCISE_WORDS or unheard_ratio(seg["text"], seg.get("word_audio")) > MAX_UNHEARD:
         return 0.0
     return min(n, 12) - max(0, n - 20) * 0.5
 
@@ -150,17 +229,22 @@ def select_exercise_lines(segments: list[dict], interval: int) -> list[int]:
     intervalo de vídeo corrido. Com `interval` 0, toda fala com palavra para completar vira exercício.
     """
     if interval <= 0:
-        return [s["id"] for s in segments if any(p.eligible for p in split_parts(s["text"]))]
+        def has_words(s: dict) -> bool:
+            if s.get("allowed") is not None:
+                return bool(s["allowed"])
+            return any(p.eligible for p in split_parts(s["text"]))
+
+        return [s["id"] for s in segments if has_words(s)]
     windows: dict[int, list[dict]] = {}
     for seg in segments:
-        if _line_score(seg["text"]) > 0:
+        if _line_score(seg) > 0:
             windows.setdefault(int(seg["start"] // interval), []).append(seg)
     chosen: list[int] = []
     last_end = float("-inf")
     for key in sorted(windows):
         options = [s for s in windows[key] if s["start"] >= last_end + interval / 2]
         if options:
-            best = max(options, key=lambda s: (_line_score(s["text"]), -s["start"]))
+            best = max(options, key=lambda s: (_line_score(s), -s["start"]))
             chosen.append(best["id"])
             last_end = best["end"]
     return chosen

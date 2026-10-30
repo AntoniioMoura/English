@@ -53,10 +53,10 @@ def replace_segments(conn: sqlite3.Connection, video_id: int, rev: int, segments
     conn.executemany(
         """INSERT INTO listening_segments
            (video_id, processing_rev, idx, start, end, text, translation_pt, original_text, original_start,
-            original_end, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            original_end, word_audio, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         [(video_id, rev, i, s["start"], s["end"], s["text"], s.get("translation_pt"), s["text"], s["start"],
-          s["end"], now) for i, s in enumerate(segments)],
+          s["end"], s.get("word_audio"), now) for i, s in enumerate(segments)],
     )
 
 
@@ -123,7 +123,7 @@ def insert_items(conn: sqlite3.Connection, session_id: int, items: list[dict]) -
 
 def session_items(conn: sqlite3.Connection, session_id: int) -> list[dict]:
     rows = conn.execute(
-        """SELECT i.*, s.start, s.end, s.text AS segment_text, s.translation_pt, s.flagged
+        """SELECT i.*, s.start, s.end, s.text AS segment_text, s.translation_pt, s.flagged, s.word_audio
            FROM listening_session_items i JOIN listening_segments s ON s.id = i.segment_id
            WHERE i.session_id = ? ORDER BY i.position""", (session_id,))
     return [{**dict(r), "blanks": json.loads(r["blanks"])} for r in rows]
@@ -131,7 +131,7 @@ def session_items(conn: sqlite3.Connection, session_id: int) -> list[dict]:
 
 def get_item(conn: sqlite3.Connection, item_id: int) -> dict | None:
     row = conn.execute(
-        """SELECT i.*, s.start, s.end, s.text AS segment_text, s.translation_pt, s.flagged, s.video_id
+        """SELECT i.*, s.start, s.end, s.text AS segment_text, s.translation_pt, s.flagged, s.word_audio, s.video_id
            FROM listening_session_items i JOIN listening_segments s ON s.id = i.segment_id
            WHERE i.id = ?""", (item_id,)).fetchone()
     return {**dict(row), "blanks": json.loads(row["blanks"])} if row else None
