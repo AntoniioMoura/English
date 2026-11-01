@@ -61,6 +61,17 @@ a { color: inherit; text-decoration: none; }
 .topbar nav a:hover { background: var(--bg); color: var(--text); }
 .topbar nav a.active { color: var(--primary); background: var(--primary-soft); }
 
+.study-clock {
+  display: inline-flex; align-items: center; gap: 7px; padding: 5px 12px; border-radius: 999px;
+  border: 1px solid var(--border); background: var(--surface); color: var(--muted);
+  font-size: 0.95rem; font-weight: 650; font-variant-numeric: tabular-nums; white-space: nowrap;
+  transition: border-color 0.15s, color 0.15s;
+}
+.study-clock:hover { border-color: var(--primary); }
+.study-clock .dot { width: 8px; height: 8px; border-radius: 50%; background: #c4c4c4; }
+.study-clock-running { color: var(--ok); border-color: #a9dfc1; background: var(--ok-soft); }
+.study-clock-running .dot { background: var(--ok); }
+
 .content { max-width: 900px; margin: 0 auto; padding: 40px 20px 72px; }
 .stack { display: flex; flex-direction: column; gap: 20px; }
 .stack-sm { display: flex; flex-direction: column; gap: 10px; }
@@ -305,6 +316,30 @@ a { color: inherit; text-decoration: none; }
 .tile { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; }
 .tile-value { font-size: 1.6rem; font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums; }
 .tile-label { font-size: 0.85rem; color: var(--muted); margin-top: 2px; }
+/* Calendário de estudos */
+.study-month-nav { display: flex; align-items: center; gap: 10px; }
+.study-month-nav strong { min-width: 150px; text-align: center; }
+.study-month-nav .btn { padding: 5px 12px; }
+.study-calendar { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; }
+.study-weekday { text-align: center; font-size: 0.78rem; font-weight: 600; color: var(--muted); padding-bottom: 4px; }
+.study-day {
+  display: flex; flex-direction: column; align-items: flex-start; justify-content: space-between; gap: 2px;
+  min-height: 72px; padding: 7px 9px; border: 1px solid var(--border); border-radius: 10px;
+  background: var(--surface); color: var(--text); font: inherit; cursor: pointer; text-align: left;
+}
+.study-day:hover:not(:disabled) { border-color: var(--primary); }
+.study-day:disabled { opacity: 0.45; cursor: default; }
+.study-day-number { font-size: 0.85rem; font-weight: 600; }
+.study-day-time { font-size: 0.78rem; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.study-day-done { background: rgba(21, 127, 75, var(--level)); border-color: #a9dfc1; }
+.study-day-today .study-day-number { color: var(--primary); text-decoration: underline; text-underline-offset: 3px; }
+.study-day-selected { outline: 2px solid var(--primary); outline-offset: 1px; }
+.study-detail-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+.study-detail-head h2::first-letter { text-transform: uppercase; }
+.study-activity { display: grid; grid-template-columns: 150px 1fr 70px; gap: 6px 12px; align-items: center; font-size: 0.93rem; }
+.study-activity .bar > span { background: var(--accent); }
+.study-activity-time { text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
+
 .table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
 .table { width: 100%; border-collapse: collapse; font-size: 0.93rem; }
 .table th { text-align: left; font-weight: 600; color: var(--muted); font-size: 0.8rem; padding: 10px 12px; border-bottom: 1px solid var(--border); }
@@ -583,7 +618,13 @@ a { color: inherit; text-decoration: none; }
 @media (max-width: 640px) {
   .topbar { flex-wrap: wrap; gap: 10px; padding: 10px 16px; }
   .topbar nav { order: 3; flex: 1 1 100%; overflow-x: auto; scrollbar-width: none; }
-  .topbar .badge { margin-left: auto; }
+  .topbar .badge { order: 2; }
+  .study-clock { margin-left: auto; }
+  .study-calendar { gap: 4px; padding: 10px; }
+  .study-day { min-height: 54px; padding: 4px; }
+  .study-day-time { font-size: 0.64rem; }
+  .study-activity { grid-template-columns: 1fr auto; }
+  .study-activity .bar { grid-row: 2; grid-column: 1 / -1; }
   .topbar nav a { white-space: nowrap; }
   .content { padding: 24px 16px 56px; }
   .hero h1 { font-size: 1.8rem; }

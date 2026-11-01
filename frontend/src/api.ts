@@ -174,6 +174,27 @@ export interface Report extends ReportSummary {
   data: ReportData;
 }
 
+export type StudyActivity = "builder" | "anki_practice" | "anki_review" | "listening";
+
+export interface StudyToday {
+  day: string;
+  total_seconds: number;
+  seconds_until_reset: number;
+}
+
+export interface StudyDay {
+  date: string;
+  total_seconds: number;
+  activities: Partial<Record<StudyActivity, number>>;
+}
+
+export interface StudyMonth {
+  month: string;
+  today: string;
+  total_seconds: number;
+  days: StudyDay[];
+}
+
 export class ApiError extends Error {
   constructor(message: string, public status: number, public code?: string) {
     super(message);
@@ -238,4 +259,8 @@ export const api = {
   },
   reportMarkdownUrl: (id: number) => `/api/reports/${id}/markdown`,
   ollamaStatus: () => request<OllamaStatus>("/api/settings/ollama/status"),
+  studyToday: () => request<StudyToday>("/api/study-time/today"),
+  addStudyTime: (day: string, seconds: Partial<Record<StudyActivity, number>>, keepalive = false) =>
+    request<StudyToday>("/api/study-time", { method: "POST", body: JSON.stringify({ day, seconds }), keepalive }),
+  studyMonth: (month?: string) => request<StudyMonth>(`/api/study-time/month${month ? `?month=${month}` : ""}`),
 };

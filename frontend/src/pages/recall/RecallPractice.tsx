@@ -4,6 +4,7 @@ import { ApiError } from "../../api";
 import { RecallCard } from "../../components/RecallCard";
 import { RecallStatus } from "../../components/RecallStatus";
 import { recallApi, RecallExercise } from "../../recallApi";
+import { useStudyPause, useStudyTimer } from "../../studyTimer";
 
 type Blocker = { code: string; message: string } | null;
 
@@ -42,6 +43,10 @@ export function RecallPractice() {
 
   const done = exercise?.status === "evaluated";
   const blocked = blocker?.code === "daily_limit" || (done && exercise?.quota.blocked);
+
+  // Sem frase para fazer (limite do dia, nenhuma palavra cadastrada, erro) ou lendo o resultado, o tempo não conta.
+  useStudyTimer("anki_practice", !done && !blocked && !(blocker && !exercise));
+  useStudyPause(loading);
 
   return (
     <div className="stack narrow-wide">

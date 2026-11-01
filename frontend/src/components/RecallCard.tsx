@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { newIdempotencyKey, recallApi, RecallExercise } from "../recallApi";
+import { useStudyPause } from "../studyTimer";
 import { DiffText } from "./DiffText";
 import { ScoreMeter } from "./ScoreMeter";
 
@@ -19,6 +20,7 @@ export function RecallCard({ exercise, onChange, onSkip }: Props) {
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  useStudyPause(busy);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   // Uma chave por exercício: duplo clique ou reenvio de rede não registram duas tentativas.
   const key = useMemo(() => newIdempotencyKey(), [exercise.id]);

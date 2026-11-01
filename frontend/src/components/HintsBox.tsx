@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { api } from "../api";
+import { useStudyPause } from "../studyTimer";
 
 interface Props {
   exerciseId: number;
@@ -13,6 +14,7 @@ export function HintsBox({ exerciseId, stage, cached }: Props) {
   const [hints, setHints] = useState<string[] | null>(cached ?? null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  useStudyPause(loading);
 
   async function toggle() {
     if (open) {

@@ -21,6 +21,8 @@ O sistema tem três modos de estudo e um relatório:
   e completa as palavras que faltam nas legendas, conferidas letra a letra. O vídeo corre com a legenda completa e
   para em algumas frases; as lacunas só caem em palavras realmente ditas no áudio. Erros, ajudas e progresso ficam
   salvos, com painel e revisão dos trechos errados.
+- **Tempo de estudo** — relógio no canto superior direito com as horas estudadas hoje, zerado à meia-noite. Clicar
+  nele abre o calendário com os dias estudados e o tempo de cada tipo de exercício.
 - **Relatórios** — análise do Criador de frases e do Anki Premium no período, com métricas calculadas pelo
   sistema (precisão por tópico, erros mais frequentes, autocorreções, evolução semanal, palavras usadas e
   revisões), comentada pela IA e exportável em Markdown.
@@ -76,9 +78,10 @@ backend/app/
   api/routes.py          endpoints HTTP finos
   migrations/            SQL numerado, aplicado automaticamente na inicialização
 frontend/src/
-  pages/                 Home, FramePicker, ExercisePage, Progress, Reports, recall/*, listening/*
+  pages/                 Home, FramePicker, ExercisePage, Progress, Reports, StudyCalendar, recall/*, listening/*
   components/            Stepper, HintsBox, FeedbackPanel...
   sounds.ts              sons de digitação do Listening (Web Audio, sem arquivos)
+  studyTimer.ts          relógio de estudo: conta o tempo da tela ativa e envia ao backend
   modes.ts               registro do menu — novos modos de estudo entram aqui
 ```
 
@@ -122,6 +125,9 @@ frontend/src/
 | POST | `/api/listening/sessions/{id}/items/{item}/check` · `reveal` · `replay` · `skip` · `translate` | Exercício |
 | GET | `/api/listening/stats` | Painel |
 | GET/POST/DELETE | `/api/listening/downloads` | Downloads do YouTube |
+| GET | `/api/study-time/today` | Total de hoje e segundos até a meia-noite |
+| POST | `/api/study-time` | `{seconds: {atividade: n}, day?}` — soma o tempo medido |
+| GET | `/api/study-time/month` | Dias estudados no mês (`?month=2026-10`), por atividade |
 
 ## Relatórios (Fase 2)
 
@@ -228,6 +234,22 @@ mudaram durante o desenvolvimento; o que vale é o descrito aqui). Rotas em `/ap
 
 Acerto por vídeo e dificuldade, onde você parou, palavras mais erradas (erros ÷ tentativas, sem nomes e termos de nicho),
 evolução por sessão e revisão dos trechos errados (reaproveita os trechos e foca nas palavras erradas).
+
+## Tempo de estudo
+
+Medido em [studyTimer.ts](frontend/src/studyTimer.ts) e enviado a cada 10 s; o dia segue o fuso das configurações
+(padrão `America/Sao_Paulo`) e o histórico fica na tabela `study_time`.
+
+- **Criador de frases:** conta enquanto você escreve as versões, depois de escolher a estrutura.
+- **Anki Premium:** conta em Praticar e Revisar, separados. Não conta sem frase para fazer (limite do dia, nada a revisar).
+- **Listening:** conta do primeiro play em diante, inclusive parado numa frase para digitar. Para se você pausar o vídeo
+  ou a sessão terminar.
+- **Telas de resultado:** não contam. Feedback do Criador, resultado da frase no Anki e no Listening só informam; o
+  relógio volta quando há algo para fazer de novo.
+- **Não contam:** relatórios, menus, catálogo, preparação de vídeos, Minhas palavras e o calendário. A aba escondida ou
+  minimizada também pausa.
+- **IA processando:** o relógio pausa enquanto você só aguarda a IA: avaliação e ideias do Criador de frases, criação e
+  correção de frases do Anki e tradução PT do Listening.
 
 ## Próximos passos
 

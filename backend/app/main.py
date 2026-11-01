@@ -10,6 +10,7 @@ from . import config, db
 from .api.listening_routes import router as listening_router
 from .api.recall_routes import router as recall_router
 from .api.routes import router
+from .api.study_time_routes import router as study_time_router
 from .domain.rules import RuleViolation
 from .services import listening_downloads, listening_media, recall_service
 from .services.exercise_service import NotFound
@@ -52,6 +53,7 @@ def create_app(db_path: Path | str | None = None, videos_dir: Path | None = None
     app.include_router(router)
     app.include_router(recall_router)
     app.include_router(listening_router)
+    app.include_router(study_time_router)
 
     # Em produção local (`npm run build`), a própria API serve a interface.
     if FRONTEND_DIST.exists():

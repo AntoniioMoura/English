@@ -4,6 +4,7 @@ import { ApiError } from "../../api";
 import { RecallCard } from "../../components/RecallCard";
 import { RecallStatus } from "../../components/RecallStatus";
 import { recallApi, RecallExercise, ReviewItem } from "../../recallApi";
+import { useStudyPause, useStudyTimer } from "../../studyTimer";
 
 const brDateTime = (iso: string) =>
   new Date(iso).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
@@ -48,6 +49,10 @@ export function RecallReview() {
   }, [start]);
 
   const done = exercise?.status === "evaluated";
+
+  // Sem revisão pendente, com erro ao criá-la ou lendo o resultado, o tempo não conta.
+  useStudyTimer("anki_review", !done && due?.length !== 0 && !(error && !exercise));
+  useStudyPause(loading);
 
   return (
     <div className="stack narrow-wide">

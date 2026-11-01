@@ -1,5 +1,6 @@
 import { Link, NavLink, Route, Routes, useLocation } from "react-router-dom";
 import { OllamaBadge } from "./components/OllamaBadge";
+import { StudyClock } from "./components/StudyClock";
 import { ExercisePage } from "./pages/ExercisePage";
 import { FramePicker } from "./pages/FramePicker";
 import { Home } from "./pages/Home";
@@ -15,6 +16,7 @@ import { RecallPractice } from "./pages/recall/RecallPractice";
 import { RecallReview } from "./pages/recall/RecallReview";
 import { RecallWords } from "./pages/recall/RecallWords";
 import { Reports } from "./pages/Reports";
+import { StudyCalendar } from "./pages/StudyCalendar";
 
 export default function App() {
   // Catálogo e player de vídeo pedem uma área mais larga que as telas de texto.
@@ -35,6 +37,7 @@ export default function App() {
           <NavLink to="/reports">Relatórios</NavLink>
         </nav>
         <OllamaBadge />
+        <StudyClock />
       </header>
       <main className={wide ? "content content-wide" : "content"}>
         <Routes>
@@ -53,6 +56,7 @@ export default function App() {
           <Route path="/listening/session/:id" element={<ListeningPlayer />} />
           <Route path="/progress" element={<Progress />} />
           <Route path="/reports" element={<Reports />} />
+          <Route path="/study" element={<StudyCalendar />} />
           <Route path="*" element={<p>Página não encontrada.</p>} />
         </Routes>
       </main>

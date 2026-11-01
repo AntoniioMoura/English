@@ -2,6 +2,7 @@ import { KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from
 import { Link, useParams } from "react-router-dom";
 import { formatTime, ItemResult, listeningApi, pct, Session, SessionItem } from "../../listeningApi";
 import { setSoundEnabled, soundEnabled, sounds } from "../../sounds";
+import { useStudyPause, useStudyTimer } from "../../studyTimer";
 
 const PREROLL = 0.15; // começa um pouco antes para não cortar a primeira sílaba
 
@@ -46,6 +47,8 @@ export function ListeningPlayer() {
   const lastStatus = useRef<Record<number, SessionItem["status"]>>({});
   const [needsGesture, setNeedsGesture] = useState(false);
   const [playing, setPlaying] = useState(false);
+  const [startedPlaying, setStartedPlaying] = useState(false);
+  const [userPaused, setUserPaused] = useState(false);
   const [time, setTime] = useState(0);
   const [skipMenu, setSkipMenu] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -69,6 +72,12 @@ export function ListeningPlayer() {
   }, [sessionId]);
 
   const item: SessionItem | undefined = session?.items[index];
+
+  // O tempo conta do primeiro play em diante, inclusive parado numa frase para digitar. Para se você
+  // pausar o vídeo, a sessão terminar ou a tela só estiver mostrando o resultado da frase.
+  const showingResult = !!item && item.status !== "pending" && !playing;
+  useStudyTimer("listening", startedPlaying && !userPaused && !showingResult && session?.status === "active");
+  useStudyPause(!!translation && translation.text === null && translation.error === null);
 
   // ---------- vídeo ----------
 
@@ -192,6 +201,7 @@ export function ListeningPlayer() {
     const video = videoRef.current;
     if (!video || !item) return;
     if (!video.paused) {
+      setUserPaused(true);
       video.pause();
       return;
     }
@@ -403,6 +413,8 @@ export function ListeningPlayer() {
           playsInline
           onPlay={() => {
             setPlaying(true);
+            setStartedPlaying(true);
+            setUserPaused(false);
             requestAnimationFrame(tick);
           }}
           onPause={() => setPlaying(false)}

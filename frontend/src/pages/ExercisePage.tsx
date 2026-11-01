@@ -5,6 +5,7 @@ import { FeedbackPanel } from "../components/FeedbackPanel";
 import { FrameText } from "../components/FrameText";
 import { HintsBox } from "../components/HintsBox";
 import { Stepper } from "../components/Stepper";
+import { useStudyPause, useStudyTimer } from "../studyTimer";
 
 const draftKey = (id: number, stage: number) => `eb-draft-${id}-${stage}`;
 
@@ -44,6 +45,10 @@ export function ExercisePage() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const stage = state?.next_version_index ?? null;
+
+  // Só conta enquanto você escreve: depois da última versão, a tela só mostra o resultado.
+  useStudyTimer("builder", stage !== null);
+  useStudyPause(evaluating);
 
   const applyState = useCallback((next: ExerciseState) => {
     setState(next);
