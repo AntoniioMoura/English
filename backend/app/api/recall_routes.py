@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 from ..llm.client import LLMClient, LLMError
 from ..repositories import recall as repo
 from ..services import recall_service as service
-from .deps import get_conn, get_llm
+from .deps import get_conn, get_corrector, get_llm
 
 router = APIRouter(prefix="/api/recall")
 
@@ -79,7 +79,7 @@ def get_exercise(exercise_id: int, conn: sqlite3.Connection = Depends(get_conn))
 
 @router.post("/exercises/{exercise_id}/answer")
 def answer(exercise_id: int, body: AnswerIn, conn: sqlite3.Connection = Depends(get_conn),
-           llm: LLMClient = Depends(get_llm)):
+           llm: LLMClient = Depends(get_corrector)):
     return service.answer(conn, llm, exercise_id, body.answer, body.idempotency_key)
 
 
@@ -89,7 +89,7 @@ def skip(exercise_id: int, conn: sqlite3.Connection = Depends(get_conn)):
 
 
 @router.post("/exercises/{exercise_id}/evaluate")
-def reevaluate(exercise_id: int, conn: sqlite3.Connection = Depends(get_conn), llm: LLMClient = Depends(get_llm)):
+def reevaluate(exercise_id: int, conn: sqlite3.Connection = Depends(get_conn), llm: LLMClient = Depends(get_corrector)):
     return service.reevaluate(conn, llm, exercise_id)
 
 

@@ -5,7 +5,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from fastapi.testclient import TestClient
 
-from app.api.deps import get_llm
+from app.api.deps import get_corrector, get_llm
 from app.domain.recall import canonical_tokens, target_demonstrated
 from app.domain.scheduler import SchedulerState, scheduler
 from app.llm.client import LLMError
@@ -35,9 +35,10 @@ def prompt(sentence, reference, targets=(), tags=("past_simple",)):
             "targets": [{"english_text": t, "meaning_pt": "x"} for t in targets], "grammar_tags": list(tags)}
 
 
-def evaluation(verdict="correct", errors=(), meaning=True, grammar=True, confidence=0.9, example=""):
-    return {"error_events": list(errors), "meaning_match": meaning, "grammar_valid": grammar, "verdict": verdict,
-            "strengths": ["Boa conexão com because."], "valid_example_en": example, "confidence": confidence}
+def evaluation(verdict="correct", errors=(), meaning=True, grammar=True, confidence=0.9, example="", natural=""):
+    return {"natural_en": natural, "error_events": list(errors), "meaning_match": meaning, "grammar_valid": grammar,
+            "verdict": verdict, "strengths": ["Boa conexão com because."], "valid_example_en": example,
+            "confidence": confidence}
 
 
 DIDNT_ERROR = {"category": "grammar", "topic_id": "auxiliaries_negation", "excerpt": "didn't played",
@@ -489,6 +490,7 @@ def test_backfill_and_restart_keep_sentence_reviews(db_path, llm):
     import sqlite3
     app = create_app(db_path)
     app.dependency_overrides[get_llm] = lambda: llm
+    app.dependency_overrides[get_corrector] = lambda: llm
     with TestClient(app) as c:
         user_case(c, llm)
     conn = sqlite3.connect(db_path)
@@ -521,7 +523,8 @@ def test_valid_translation_shows_the_target_when_answer_did_not_use_it(client, l
     r = answer(client, ex["id"], "they're gonna do what they want")
     usage = r["result"]["target_usage"][0]
     assert usage["demonstrated"] is False and usage["meaning_pt"] == "x"
-    assert r["result"]["alternative_en"] == "They're gonna do whatever they want."
+    shown = r["result"]["alternative_en"] or r["result"]["natural_en"]  # a mesma frase aparece uma vez só
+    assert shown == "They're gonna do whatever they want."
 
 
 def test_valid_translation_unchanged_when_target_was_used(client, llm):
@@ -530,3 +533,52 @@ def test_valid_translation_unchanged_when_target_was_used(client, llm):
     llm.queue(evaluation("correct", example="They will do whatever they want."))
     r = answer(client, ex["id"], "they're gonna do whatever they like")
     assert r["result"]["alternative_en"] == "They will do whatever they want."
+
+
+def test_natural_version_comes_from_the_portuguese_not_from_the_answer(client, llm):
+    add_words(client, "tired")
+    ex = new_ex(client, llm)
+    llm.queue(evaluation("incorrect", [DIDNT_ERROR], example="I didn't play yesterday because I was tired.",
+                         natural="I didn't play yesterday 'cause I was really tired."))
+    r = answer(client, ex["id"], "I didn't played yesterday because I was tired")
+    assert r["result"]["corrected_answer"] == "I didn't play yesterday because I was tired"
+    assert r["result"]["natural_en"] == "I didn't play yesterday 'cause I was really tired."
+
+
+def test_natural_version_hidden_when_it_repeats_what_is_shown(client, llm):
+    add_words(client, "tired")
+    ex = new_ex(client, llm)
+    llm.queue(evaluation("incorrect", [DIDNT_ERROR], natural="I didn't play yesterday because I was tired."))
+    r = answer(client, ex["id"], "I didn't played yesterday because I was tired")
+    assert r["result"]["natural_en"] is None
+
+
+def test_natural_version_falls_back_to_the_reference(client, llm):
+    add_words(client, "tired")
+    ex = new_ex(client, llm)
+    llm.queue(evaluation("correct", example="I didn't play yesterday as I was tired."))
+    r = answer(client, ex["id"], "I didn't play yesterday since I was tired")
+    assert r["result"]["natural_en"] == "I didn't play yesterday because I was tired."
+
+
+def test_natural_version_replaces_an_equal_valid_translation(client, llm):
+    add_words(client, "tired")
+    ex = new_ex(client, llm)
+    llm.queue(evaluation("incorrect", [DIDNT_ERROR], example="I didn't play yesterday 'cause I was so tired.",
+                         natural="I didn't play yesterday 'cause I was so tired."))
+    r = answer(client, ex["id"], "I didn't played yesterday because I was tired")
+    assert r["result"]["alternative_en"] is None
+    assert r["result"]["natural_en"] == "I didn't play yesterday 'cause I was so tired."
+
+
+def test_overlapping_corrections_are_applied_once(client, llm):
+    add_words(client, "old")
+    ex = new_ex(client, llm, "Ela tem 25 anos.", "She is 25 years old.", ("old",))
+    llm.queue(evaluation("incorrect", [
+        {"category": "grammar", "topic_id": "other", "excerpt": "has 25 years", "correction": "is 25 years old",
+         "explanation_pt": "Idade usa be."},
+        {"category": "lexical", "topic_id": "other", "excerpt": "25 years", "correction": "25 years old",
+         "explanation_pt": "Falta old."},
+    ]))
+    r = answer(client, ex["id"], "She has 25 years")
+    assert r["result"]["corrected_answer"] == "She is 25 years old"

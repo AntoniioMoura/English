@@ -13,8 +13,8 @@ from ..repositories import exercises as ex_repo
 from ..repositories import frames as frames_repo
 from ..repositories import reports as reports_repo
 from ..services import exercise_service, report_service, settings_service
-from ..services.settings_service import OllamaConfig
-from .deps import get_conn, get_llm
+from ..services.settings_service import ClaudeSettings, OllamaConfig
+from .deps import get_conn, get_corrector, get_llm
 
 router = APIRouter(prefix="/api")
 
@@ -96,7 +96,7 @@ def hints(
 
 
 @router.post("/exercises/{exercise_id}/evaluate")
-def evaluate(exercise_id: int, conn: sqlite3.Connection = Depends(get_conn), llm: LLMClient = Depends(get_llm)):
+def evaluate(exercise_id: int, conn: sqlite3.Connection = Depends(get_conn), llm: LLMClient = Depends(get_corrector)):
     return exercise_service.evaluate(conn, llm, exercise_id)
 
 
@@ -152,6 +152,19 @@ def get_ollama_settings(conn: sqlite3.Connection = Depends(get_conn)):
 @router.put("/settings/ollama")
 def put_ollama_settings(body: OllamaConfig, conn: sqlite3.Connection = Depends(get_conn)):
     return settings_service.save_ollama_config(conn, body)
+
+
+@router.get("/settings/claude")
+def get_claude_settings(conn: sqlite3.Connection = Depends(get_conn)):
+    return settings_service.claude_status(conn)
+
+
+@router.put("/settings/claude")
+def put_claude_settings(body: ClaudeSettings, conn: sqlite3.Connection = Depends(get_conn)):
+    try:
+        return settings_service.save_claude_settings(conn, body)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail={"code": "no_api_key", "message": str(exc)}) from exc
 
 
 @router.get("/settings/ollama/status")

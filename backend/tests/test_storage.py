@@ -4,7 +4,7 @@ from fastapi.testclient import TestClient
 
 from conftest import V, complete_versions, make_evaluation, new_exercise
 
-from app.api.deps import get_llm
+from app.api.deps import get_corrector, get_llm
 from app.db import connect, init_db, migrate
 from app.llm.client import LLMError, LLMUnavailable
 from app.main import create_app
@@ -78,6 +78,7 @@ def test_hint_failure_returns_503_and_keeps_exercise(client, llm):
 def test_history_survives_app_restart(db_path, llm):
     app = create_app(db_path)
     app.dependency_overrides[get_llm] = lambda: llm
+    app.dependency_overrides[get_corrector] = lambda: llm
     with TestClient(app) as c:
         ex = new_exercise(c)
         complete_versions(c, ex["id"])

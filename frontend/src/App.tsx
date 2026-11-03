@@ -1,4 +1,5 @@
 import { Link, NavLink, Route, Routes, useLocation } from "react-router-dom";
+import { ClaudeSwitch } from "./components/ClaudeSwitch";
 import { OllamaBadge } from "./components/OllamaBadge";
 import { StudyClock } from "./components/StudyClock";
 import { ExercisePage } from "./pages/ExercisePage";
@@ -37,6 +38,7 @@ export default function App() {
           <NavLink to="/reports">Relatórios</NavLink>
         </nav>
         <OllamaBadge />
+        <ClaudeSwitch />
         <StudyClock />
       </header>
       <main className={wide ? "content content-wide" : "content"}>

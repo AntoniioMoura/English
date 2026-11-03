@@ -6,6 +6,9 @@ frontend/node_modules/
 # Build da interface (gerado por `npm run build`)
 frontend/dist/
 
+# Chave da API do Claude e outros segredos locais
+backend/.env
+
 # Dados pessoais de estudo (banco SQLite local, cache do Listening) e vídeos do usuário
 backend/data/
 videos/

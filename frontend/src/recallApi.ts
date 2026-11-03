@@ -27,6 +27,7 @@ export interface RecallResult {
   }[];
   corrected_answer: string | null;
   alternative_en: string | null;
+  natural_en?: string | null;
   target_usage: {
     vocabulary_id: number;
     english_text: string;

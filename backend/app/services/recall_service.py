@@ -467,7 +467,7 @@ def get_state(conn: sqlite3.Connection, exercise_id: int) -> dict:
 def _result_view(conn: sqlite3.Connection, exercise: dict, attempt: dict | None,
                  evaluation: dict | None) -> dict | None:
     """Resultado salvo + sentido de cada palavra-alvo. Aplica também a avaliações antigas a regra de
-    mostrar uma tradução válida que use a palavra-alvo quando você não a usou."""
+    mostrar uma tradução válida que use a palavra-alvo quando você não a usou e a forma natural."""
     if not attempt or not evaluation or evaluation["status"] != "completed":
         return None
     result = dict(evaluation["result"] or {})
@@ -475,6 +475,11 @@ def _result_view(conn: sqlite3.Connection, exercise: dict, attempt: dict | None,
     usage_list = [rules.TargetUsage(**u) for u in result.get("target_usage", [])]
     result["alternative_en"] = rules.alternative_using_targets(
         result.get("alternative_en"), exercise["reference_en"], attempt["answer_text"], usage_list)
+    result["natural_en"] = rules.natural_version(
+        result.get("natural_en"), exercise["reference_en"], attempt["answer_text"], [result.get("corrected_answer")])
+    if result["natural_en"] and result["alternative_en"] and rules.same_meaning_form(
+            result["natural_en"], result["alternative_en"]):
+        result["alternative_en"] = None  # a mesma frase aparece uma vez só, como "Como um nativo diria"
     result["target_usage"] = [u.model_dump() | {"meaning_pt": meanings.get(u.vocabulary_id)} for u in usage_list]
     return result
 

@@ -195,6 +195,7 @@ class ProcessedRecall(BaseModel):
     errors: list[RecallError] = Field(default_factory=list)
     corrected_answer: str | None = None
     alternative_en: str | None = None
+    natural_en: str | None = None
     target_usage: list[TargetUsage] = Field(default_factory=list)
     suggestion: Suggestion | None = None
     message_pt: str | None = None
@@ -217,6 +218,15 @@ def alternative_using_targets(alternative: str | None, reference: str, answer: s
         if candidate and all(target_demonstrated(m, candidate) for m in missing):
             return None if same_meaning_form(candidate, answer) else candidate
     return alternative
+
+
+def natural_version(natural: str | None, reference: str, answer: str, shown: list[str | None]) -> str | None:
+    """Como um nativo diria, sem partir da sua resposta. Avaliações antigas não têm: usa a referência.
+    Some quando repete o que já está na tela."""
+    candidate = (natural or reference or "").strip()
+    if not candidate or any(t and same_meaning_form(candidate, t) for t in [answer, *shown]):
+        return None
+    return candidate
 
 
 def exact_match_result(answer: str, reference: str, targets: list[dict]) -> ProcessedRecall:
@@ -321,6 +331,7 @@ def process_recall_evaluation(
         errors=errors[:2] if verdict == "incorrect" else [],
         corrected_answer=corrected,
         alternative_en=alternative,
+        natural_en=raw.natural_en.strip() or None,
         target_usage=target_usage,
         suggestion=suggestion if verdict != "needs_review" else None,
         message_pt=message,

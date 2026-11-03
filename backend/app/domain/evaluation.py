@@ -166,18 +166,27 @@ def keep_user_case(original: str, correction: str) -> str:
 
 
 def apply_corrections(sentence: str, errors: list[GrammarErrorItem]) -> str:
-    """Corrige apenas os trechos com erro, preservando as palavras do usuário."""
-    result = sentence
+    """Corrige apenas os trechos com erro, preservando as palavras do usuário. Trechos que se sobrepõem
+    (a IA às vezes aponta "has 25 years" e também "25 years") valem uma vez só: fica o maior."""
+    normalized = sentence.replace("’", "'")
+    spans: list[tuple[int, int, str]] = []
     for error in errors:
         core = _strip_edges(error.original_excerpt)
-        replacement = error.suggested_correction.strip().strip(".!?") if core else ""
         if not core:
             continue
         regex = re.compile(r"(?<![\w'])" + re.escape(core) + r"(?![\w'])", re.IGNORECASE)
-        normalized = result.replace("’", "'")
         match = regex.search(normalized)
         if match:
-            result = normalized[: match.start()] + replacement + normalized[match.end():]
+            spans.append((match.start(), match.end(), error.suggested_correction.strip().strip(".!?")))
+    chosen: list[tuple[int, int, str]] = []
+    for start, end, replacement in sorted(spans, key=lambda s: s[0] - s[1]):  # maiores primeiro
+        if all(end <= s or start >= e for s, e, _ in chosen):
+            chosen.append((start, end, replacement))
+    if not chosen:
+        return sentence
+    result = normalized
+    for start, end, replacement in sorted(chosen, reverse=True):  # da direita para a esquerda
+        result = result[:start] + replacement + result[end:]
     return result
 
 

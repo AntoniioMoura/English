@@ -164,6 +164,11 @@ class LLMRecallErrorEvent(BaseModel):
 
 
 class LLMRecallEvaluation(BaseModel):
+    model_config = {"json_schema_extra": lambda schema: schema.setdefault("required", []).insert(0, "natural_en")}
+
+    # Primeiro campo: a IA escreve a forma natural antes de analisar a sua resposta, sem se ancorar nela.
+    # Obrigatório no schema enviado ao Ollama (senão ele omite o campo); vazio continua aceito na leitura.
+    natural_en: Annotated[str, _truncate(240)] = ""
     error_events: list[LLMRecallErrorEvent] = Field(default_factory=list)
     meaning_match: bool
     grammar_valid: bool

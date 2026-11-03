@@ -153,6 +153,12 @@ export function RecallCard({ exercise, onChange, onSkip }: Props) {
                 </p>
               </>
             )}
+            {result.natural_en && (
+              <>
+                <div className="muted small">Como um nativo diria</div>
+                <p className="final-sentence">{result.natural_en}</p>
+              </>
+            )}
           </div>
 
           {result.message_pt && <div className="alert alert-info">{result.message_pt}</div>}

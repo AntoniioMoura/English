@@ -1,3 +1,4 @@
+import os
 import sys
 from pathlib import Path
 
@@ -5,8 +6,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+os.environ["ENGLISH_BUILDER_NO_ENV_FILE"] = "1"  # nunca chamar o Claude de verdade nos testes
 
-from app.api.deps import get_llm  # noqa: E402
+from app.api.deps import get_corrector, get_llm  # noqa: E402
 from app.llm.client import LLMError, LLMUnavailable  # noqa: E402
 from app.llm.schemas import LLMFinalReview, LLMReferenceCheck  # noqa: E402
 from app.main import create_app  # noqa: E402
@@ -64,6 +66,7 @@ def llm():
 def client(db_path, llm):
     app = create_app(db_path)
     app.dependency_overrides[get_llm] = lambda: llm
+    app.dependency_overrides[get_corrector] = lambda: llm
     with TestClient(app) as c:
         yield c
 

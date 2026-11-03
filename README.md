@@ -31,7 +31,8 @@ Princípios que guiam a correção: maiúscula, pontuação, contrações e form
 erro; frase simples e correta não é penalizada; trechos que a IA "corrige" mas que não existem na sua
 resposta são descartados; avaliação incerta nunca pune.
 
-**Stack:** React + TypeScript + Vite · Python + FastAPI + Pydantic · SQLite · Ollama (padrão `qwen3:8b`) ·
+**Stack:** React + TypeScript + Vite · Python + FastAPI + Pydantic · SQLite · Ollama (padrão `qwen3:14b`) ·
+Claude Sonnet 5.5 (opcional, nas correções) ·
 FFmpeg + faster-whisper + yt-dlp (Listening).
 Especificações: [english_builder_especificacao.md](english_builder_especificacao.md),
 [sentence_recall_especificacao.md](sentence_recall_especificacao.md) (o *Sentence Recall* virou o Anki Premium) e
@@ -40,7 +41,8 @@ Especificações: [english_builder_especificacao.md](english_builder_especificac
 ## Como usar
 
 Requisitos: Python 3.11+, Node 18+ e [Ollama](https://ollama.com) com um modelo instalado
-(padrão: `qwen3:8b`, ajustável pela API `PUT /api/settings/ollama`). O Listening com vídeos usa também o
+(padrão: `qwen3:14b`, ~9 GB de VRAM, ajustável pela API `PUT /api/settings/ollama` ou pela variável
+`OLLAMA_MODEL`; numa placa menor, `qwen3:8b` funciona, mas deixa passar mais erros no Anki). O Listening com vídeos usa também o
 [FFmpeg](https://ffmpeg.org) (`winget install Gyan.FFmpeg`); detalhes na seção [Listening com vídeos](#listening-com-vídeos).
 
 No Windows, dê duplo clique em **`Iniciar English Builder.bat`** (ou rode `.\start.ps1`).
@@ -48,6 +50,24 @@ No Windows, dê duplo clique em **`Iniciar English Builder.bat`** (ou rode `.\st
 Abre `http://localhost:8000`. Na primeira vez, cria o ambiente Python e gera a interface; depois, a interface é
 gerada de novo sempre que o código do frontend muda.
 Os dados ficam em `backend/data/english_builder.db` (SQLite) e sobrevivem entre execuções.
+
+### Correções pelo Claude (opcional)
+
+As correções do **Criador de frases** e do **Anki** podem usar o Claude, bem mais preciso que o modelo local.
+Crie uma chave em [console.anthropic.com](https://console.anthropic.com) (a API é paga à parte da assinatura
+Pro/Max), cole em `backend/.env`, reinicie o app e ligue o interruptor **Claude** na barra do topo:
+
+```
+ANTHROPIC_API_KEY=sk-ant-...
+```
+
+Ligado, as correções gastam créditos da API; desligado (o padrão), usam o modelo do Ollama, de graça. A escolha
+fica salva no banco (`GET/PUT /api/settings/claude`). Sem chave, o interruptor aparece desabilitado.
+O arquivo fica fora do git e a chave nunca sai pela API. Uma variável de ambiente com o mesmo nome vence o arquivo. Opcionais: `CLAUDE_MODEL`
+(padrão `claude-sonnet-5-5`) e `CLAUDE_EFFORT` (padrão `low`). Sem chave, sem internet, sem saldo ou com a chave
+recusada, a correção cai para o Ollama sozinha, e a avaliação registra qual modelo corrigiu. Dicas, criação de
+frases, relatórios e o Listening continuam no Ollama. Custo com o Sonnet 5.5: alguns centavos de dólar por
+dezena de correções.
 
 ### Modo desenvolvimento
 
@@ -71,7 +91,7 @@ backend/app/
   domain/evaluation.py   separa erro gramatical de ideia de melhoria; deduplica; monta o feedback curto
   domain/listening.py    Listening: palavras, lacunas por dificuldade, nomes, frases-exercício, comparação
   media/                 FFmpeg, legendas (leitura, sincronia e conferência com o áudio), Whisper, YouTube
-  llm/                   cliente Ollama, schemas Pydantic, prompts e operações (suggest_hints, evaluate_exercise)
+  llm/                   clientes Ollama e Claude (correções, com Ollama de reserva), schemas Pydantic, prompts e operações (suggest_hints, evaluate_exercise)
   repositories/          acesso SQLite (frames, exercícios, avaliações, configurações)
   services/              orquestra o fluxo (cria exercício, salva versões, dicas, avaliação; catálogo, preparação,
                          downloads e sessões do Listening, com fila em segundo plano)
@@ -117,6 +137,7 @@ frontend/src/
 | PATCH | `/api/observations/{id}` | Revisa uma observação (`confirmed`/`dismissed`) |
 | GET/PUT | `/api/settings/ollama` | Endereço, modelo e timeout |
 | GET | `/api/settings/ollama/status` | Testa a conexão e lista modelos |
+| GET/PUT | `/api/settings/claude` | Liga/desliga as correções pelo Claude (`{"enabled": true}`) |
 | GET/POST | `/api/listening/library`, `/library/scan` | Catálogo; `scan` relê a pasta `videos/` |
 | POST | `/api/listening/videos/{id}/prepare` | Prepara (ou não faz nada se o cache vale); `{force}` refaz |
 | GET | `/api/listening/videos/{id}/stream`, `/thumbnail` | Vídeo (com Range) e miniatura |
@@ -157,6 +178,10 @@ agendador substituível em [domain/scheduler.py](backend/app/domain/scheduler.py
 - **Avaliação:** resposta igual à referência (ignorando maiúscula, pontuação e contrações) é correta sem IA.
   Maiúscula, pontuação, contrações e estilo nunca são erro; trecho que não está na resposta é descartado;
   confiança baixa → `needs_review` (não pune). Tradução correta que não usou o alvo = correta, alvo "não usado".
+- **Resultado:** "Versão corrigida" troca só os trechos errados da sua resposta e "Tradução válida" fica o mais
+  perto dela possível. "Como um nativo diria" é escrita pela IA antes de analisar a sua resposta, só a partir do
+  português, sem se ancorar no seu raciocínio. Avaliações antigas usam a referência. A mesma frase nunca aparece
+  duas vezes: igual à tradução válida, fica só como "Como um nativo diria".
 - **Cota:** 10 frases novas erradas por dia (configurável em `PATCH /api/recall/settings`), contadas a partir das
   tentativas salvas, no fuso `America/Sao_Paulo`. Idempotência por `idempotency_key` + uma tentativa por frase.
 - **Revisão:** só frases novas erradas criam revisões; errar uma revisão nunca cria outra (a fila não cresce).

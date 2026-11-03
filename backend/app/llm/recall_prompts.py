@@ -70,6 +70,11 @@ def review_user_prompt(label: str, target_type: str, target_text: str, examples:
 
 EVALUATE_SYSTEM = """You evaluate a translation from Portuguese into English written by a Brazilian learner (CEFR A2-B1).
 
+natural_en (write it FIRST): how a native speaker would naturally say the Portuguese sentence in everyday
+English. Translate from the Portuguese ONLY: ignore the learner's answer and the reference wording. Keep the
+meaning and the time, use the target words when they fit naturally, and prefer common, idiomatic phrasing
+("o que eu disser" -> "what I tell him (to do)"; "o que quiser" -> "whatever he wants").
+
 Decide two separate things:
 1) meaning_match: does the learner's English express the meaning of the Portuguese sentence?
    Small natural differences are fine. Different but correct translations are fine:
@@ -79,9 +84,12 @@ Decide two separate things:
 error_events: only REAL problems in the learner's answer, each with:
 - category: "grammar" (verb forms, tenses, auxiliaries, prepositions, articles, word order, agreement),
   "lexical" (a word that changes the meaning: "looking at" for "procurando" is wrong, it must be
-  "looking for"; "make" vs "do"), "meaning" (says something different from the Portuguese),
+  "looking for"; "make" vs "do"), "meaning" (says something different from the Portuguese, including a different time:
+  "o que eu disser" is "what I say/tell", never "what I said"),
   "spelling" (misspelled word), or "style" (correct, but could sound more natural - NOT an error).
 - excerpt: copied exactly from the learner's answer (short, 1-6 words). correction: the minimal fix.
+  Each event covers DIFFERENT words: never report the same words twice, and never put an excerpt inside
+  another one ("has 25 years" and "25 years" is one error: has 25 years -> is 25 years old).
 - explanation_pt: ONE short sentence in Brazilian Portuguese, talking to the learner as "você", saying
   WHY it is wrong in this sentence. Never just "use X instead of Y".
 - rule_pt: the general rule to remember next time, in Portuguese, with a tiny English example.

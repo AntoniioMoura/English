@@ -40,3 +40,27 @@ def save_ollama_config(conn: sqlite3.Connection, cfg: OllamaConfig) -> OllamaCon
 def build_client(conn: sqlite3.Connection) -> OllamaClient:
     cfg = get_ollama_config(conn)
     return OllamaClient(OllamaSettings(cfg.base_url, cfg.model, cfg.timeout_seconds))
+
+
+class ClaudeSettings(BaseModel):
+    """Liga as correções pelo Claude (consome créditos da API). Desligado: Ollama."""
+    enabled: bool = False
+
+
+def get_claude_settings(conn: sqlite3.Connection) -> ClaudeSettings:
+    return ClaudeSettings(**settings_repo.get_all(conn).get("claude", {}))
+
+
+def claude_status(conn: sqlite3.Connection) -> dict:
+    enabled = get_claude_settings(conn).enabled
+    key = bool(config.ANTHROPIC_API_KEY)
+    return {"enabled": enabled, "key_configured": key, "active": enabled and key,
+            "model": config.CLAUDE_MODEL, "effort": config.CLAUDE_EFFORT, "fallback_model": get_ollama_config(conn).model}
+
+
+def save_claude_settings(conn: sqlite3.Connection, cfg: ClaudeSettings) -> dict:
+    if cfg.enabled and not config.ANTHROPIC_API_KEY:
+        raise ValueError("Coloque a chave da API em backend/.env e reinicie o app para ligar o Claude.")
+    settings_repo.set_many(conn, {"claude": cfg.model_dump()})
+    conn.commit()
+    return claude_status(conn)

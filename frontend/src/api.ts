@@ -96,6 +96,15 @@ export interface OllamaStatus {
   message: string | null;
 }
 
+export interface ClaudeStatus {
+  enabled: boolean;
+  key_configured: boolean;
+  active: boolean;
+  model: string;
+  effort: string;
+  fallback_model: string;
+}
+
 export type TopicState = "precisa_de_atencao" | "revisar" | "em_evolucao" | "consistente" | "dados_insuficientes";
 export type ReportPeriod = "7d" | "30d" | "90d" | "all";
 
@@ -259,6 +268,9 @@ export const api = {
   },
   reportMarkdownUrl: (id: number) => `/api/reports/${id}/markdown`,
   ollamaStatus: () => request<OllamaStatus>("/api/settings/ollama/status"),
+  claudeStatus: () => request<ClaudeStatus>("/api/settings/claude"),
+  setClaude: (enabled: boolean) =>
+    request<ClaudeStatus>("/api/settings/claude", { method: "PUT", body: JSON.stringify({ enabled }) }),
   studyToday: () => request<StudyToday>("/api/study-time/today"),
   addStudyTime: (day: string, seconds: Partial<Record<StudyActivity, number>>, keepalive = false) =>
     request<StudyToday>("/api/study-time", { method: "POST", body: JSON.stringify({ day, seconds }), keepalive }),
