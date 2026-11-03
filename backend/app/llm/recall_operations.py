@@ -14,7 +14,8 @@ NO_REVIEW_TARGET = "a tradução de referência não usa a palavra revisada"
 REASONS_EN = {
     LEAK: "the Portuguese sentence contains the English word (use its Portuguese meaning instead)",
     NO_TARGET: "the English translation does not use the target word",
-    NO_REVIEW_TARGET: "the English translation does not use the word being reviewed",
+    NO_REVIEW_TARGET: "the English translation does not contain the exact word being reviewed "
+                      "(a similar word, like their instead of theirs, does not count)",
 }
 
 

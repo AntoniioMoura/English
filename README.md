@@ -187,8 +187,12 @@ agendador substituível em [domain/scheduler.py](backend/app/domain/scheduler.py
 - **Revisão:** só frases novas erradas criam revisões; errar uma revisão nunca cria outra (a fila não cresce).
   - Erro que envolve uma palavra registrada → revisão da palavra, com **frases novas** para ela.
   - Qualquer outro erro → **uma revisão da mesma frase**, que volta idêntica (sem IA) até você acertar.
-  - Errou a revisão: volta na hora para o fim da fila de hoje. Acertou: 1-3-7-14-30 dias, encurtados 15% por
-    erro acumulado (mínimo 30%). "Estável" só após 3 acertos em 3 dias diferentes.
+  - Errou a revisão: volta na hora para o fim da fila de hoje. Na revisão de palavra, conta como erro não usar a
+    palavra ou errar nela mesma ("theirs parents"); usou certo mas errou outra coisa, ou a IA ficou em dúvida: não
+    muda o agendamento, mas também vai para o fim da fila, para outras revisões virem antes.
+  - Acertou: 1-3-7-14-30 dias, encurtados 15% por erro acumulado (mínimo 30%). "Estável" só após 3 acertos em
+    3 dias diferentes.
+  - A frase nova da revisão de palavra precisa usar a palavra exata: "their" não conta como "theirs".
 
 ## Listening com vídeos
 

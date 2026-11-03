@@ -367,15 +367,22 @@ def _upsert_review(conn, target: dict, example: dict, exercise_id: int, attempt_
 
 def _apply_review_outcome(conn, exercise: dict, attempt_id: int, processed, targets, current: datetime, today: str):
     item = repo.get_review_item(conn, exercise["review_item_id"])
-    if not item or processed.verdict == "needs_review":
-        return  # incerteza da IA não conclui nem penaliza a revisão
+    if not item:
+        return
+    if processed.verdict == "needs_review":
+        _send_to_back(conn, item, current)  # incerteza da IA não conclui nem penaliza, mas dá a vez às outras
+        return
     if item["target_type"] == "sentence":
         failed = processed.verdict == "incorrect"  # a mesma frase: precisa sair certa
     else:
         usage = {u.vocabulary_id: u for u in processed.target_usage}
         target_usage = usage.get(int(item["target_id"]))
-        failed = processed.verdict == "incorrect" and (target_usage is None or not target_usage.demonstrated
-                                                       or any(e.category in ("lexical", "meaning") for e in processed.errors))
+        word = next((t["english_text"] for t in targets if str(t["vocabulary_id"]) == item["target_id"]), "")
+        failed = processed.verdict == "incorrect" and (
+            target_usage is None or not target_usage.demonstrated
+            or any(e.category in ("lexical", "meaning") for e in processed.errors)
+            # "theirs parents" -> "their parents": o erro está na própria palavra, mesmo classificado como gramática
+            or any(word and rules.target_demonstrated(word, e.excerpt) for e in processed.errors))
     state = SchedulerState.from_dict(item["scheduler_state"])
     if failed:
         state, due = scheduler.on_fail(state, current)
@@ -389,10 +396,19 @@ def _apply_review_outcome(conn, exercise: dict, attempt_id: int, processed, targ
         state, due = scheduler.on_success(state, current, today)
         outcome, examples = "success", item["examples"]
     else:
-        return  # palavra usada certo, mas errou outra coisa: a palavra não falhou nem foi confirmada
+        # Palavra usada certo, mas errou outra coisa: não falhou nem foi confirmada; vai para o fim da fila.
+        _send_to_back(conn, item, current)
+        return
     repo.update_review_item(conn, item["id"], scheduler_state=state.to_dict(), due_at=iso(due), examples=examples,
                             status=scheduler.status(state), last_event_local_date=today)
     repo.insert_review_event(conn, item["id"], outcome, item["due_at"], iso(due), exercise["id"], attempt_id)
+
+
+def _send_to_back(conn, item: dict, current: datetime) -> None:
+    """Revisão devida que não terminou em acerto nem em erro da palavra: vai para o fim da fila de hoje,
+    sem mudar o agendamento. Sem isso ela continua em primeiro e volta logo em seguida."""
+    if item["due_at"] <= iso(current):
+        repo.update_review_item(conn, item["id"], due_at=iso(current))
 
 
 def backfill_reviews(conn: sqlite3.Connection) -> int:
@@ -439,8 +455,9 @@ def get_state(conn: sqlite3.Connection, exercise_id: int) -> dict:
     if exercise["review_item_id"]:
         item = repo.get_review_item(conn, exercise["review_item_id"])
         review = ({"item_id": item["id"], "target_type": item["target_type"],
-                   # Revisão de frase: o rótulo é a própria frase (já está na tela).
-                   "label_pt": item["label_pt"] if item["target_type"] == "vocabulary_sense" else None}
+                   # Revisão de frase: o rótulo é a própria frase (já está na tela). Revisão de palavra: o rótulo
+                   # diz qual palavra usar, então só aparece depois da resposta avaliada (seria spoiler).
+                   "label_pt": item["label_pt"] if item["target_type"] == "vocabulary_sense" and evaluated else None}
                   if item else None)
     return {
         "id": exercise["id"],

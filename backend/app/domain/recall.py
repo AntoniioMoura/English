@@ -67,8 +67,17 @@ def same_meaning_form(a: str, b: str) -> bool:
     return canonical_tokens(a) == canonical_tokens(b)
 
 
+# Pronomes e determinantes não se flexionam: "theirs" não é "their" + s, nem "its" é "it" + s.
+NO_INFLECTION = {
+    "it", "its", "he", "his", "her", "hers", "our", "ours", "your", "yours", "their", "theirs", "my", "mine",
+    "us", "this", "these", "those", "whose", "was", "is", "has", "as", "yes", "less",
+}
+
+
 def _forms(word: str) -> set[str]:
     forms = {word, IRREGULAR.get(word, word)}
+    if word in NO_INFLECTION:
+        return forms
     for suffix, repl in (("ies", "y"), ("ied", "y"), ("ing", ""), ("ing", "e"), ("ed", ""), ("ed", "e"),
                          ("es", ""), ("s", ""), ("d", "")):
         if word.endswith(suffix) and len(word) - len(suffix) >= 2:

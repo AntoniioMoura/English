@@ -582,3 +582,72 @@ def test_overlapping_corrections_are_applied_once(client, llm):
     ]))
     r = answer(client, ex["id"], "She has 25 years")
     assert r["result"]["corrected_answer"] == "She is 25 years old"
+
+
+def test_possessive_pronouns_are_not_plurals():
+    assert not target_demonstrated("theirs", "They ate their parents' bread.")
+    assert target_demonstrated("theirs", "The house is theirs.")
+    assert not target_demonstrated("its", "It is late.")
+    assert not target_demonstrated("yours", "Is this your bag?")
+    assert target_demonstrated("play", "She plays every day.")  # verbos continuam aceitando flexões
+
+
+def _word_and_sentence_reviews(client, llm):
+    """Fila com uma revisão de palavra (look for) e, depois dela, uma de frase."""
+    add_words(client, "look for")
+    ex = new_ex(client, llm, "Eu estou procurando minhas chaves.", "I am looking for my keys.", ("look for",))
+    llm.queue(evaluation("incorrect", [{"category": "lexical", "topic_id": "other", "excerpt": "looking at",
+                                        "correction": "looking for", "explanation_pt": "x"}]))
+    answer(client, ex["id"], "I am looking at my keys")
+    ex = new_ex(client, llm, "Ela procurou o gato ontem.", "She looked for the cat yesterday.", ("look for",))
+    llm.queue(evaluation("incorrect", [{"category": "grammar", "topic_id": "past_simple", "excerpt": "the cat today",
+                                        "correction": "the cat yesterday", "explanation_pt": "x"}]))
+    answer(client, ex["id"], "She looked for the cat today")  # erro fora da palavra: revisão da frase
+    queue = due_ids(client)
+    assert len(queue) == 2
+    llm.queue(prompt("Ela está procurando o celular.", "She is looking for her phone.", ("look for",)))
+    rev = client.post(f"/api/recall/reviews/{queue[0]}/exercise").json()
+    return queue, rev
+
+
+def test_word_review_wrong_elsewhere_goes_to_the_back_of_the_queue(client, llm):
+    queue, rev = _word_and_sentence_reviews(client, llm)
+    # usou "looking for" certo, errou outra coisa: a palavra não falhou, mas dá a vez à outra revisão
+    llm.queue(evaluation("incorrect", [{"category": "grammar", "topic_id": "articles", "excerpt": "the phone",
+                                        "correction": "her phone", "explanation_pt": "x"}]))
+    answer(client, rev["id"], "She is looking for the phone")
+    assert due_ids(client) == [queue[1], queue[0]]
+    word = next(d for d in client.get("/api/recall/reviews/due").json()["due"] if d["id"] == queue[0])
+    assert word["mistakes"] == 1  # não contou como erro da palavra
+
+
+def test_uncertain_review_goes_to_the_back_of_the_queue(client, llm):
+    queue, rev = _word_and_sentence_reviews(client, llm)
+    llm.queue(evaluation("correct", confidence=0.2))
+    answer(client, rev["id"], "She is looking for her cellphone")
+    assert due_ids(client) == [queue[1], queue[0]]
+
+
+def test_grammar_error_on_the_word_itself_fails_the_word_review(client, llm):
+    queue, rev = _word_and_sentence_reviews(client, llm)
+    llm.queue(evaluation("incorrect", [{"category": "grammar", "topic_id": "other", "excerpt": "looking for of",
+                                        "correction": "looking for", "explanation_pt": "x"}]))
+    answer(client, rev["id"], "She is looking for of her phone")
+    assert due_ids(client) == [queue[1], queue[0]]
+    word = next(d for d in client.get("/api/recall/reviews/due").json()["due"] if d["id"] == queue[0])
+    assert word["mistakes"] == 2  # o erro estava na própria palavra
+
+
+def test_word_review_does_not_reveal_the_word_before_the_answer(client, llm):
+    add_words(client, "look for")
+    ex = new_ex(client, llm, "Eu estou procurando minhas chaves.", "I am looking for my keys.", ("look for",))
+    llm.queue(evaluation("incorrect", [{"category": "lexical", "topic_id": "other", "excerpt": "looking at",
+                                        "correction": "looking for", "explanation_pt": "x"}]))
+    answer(client, ex["id"], "I am looking at my keys")
+    item_id = due_ids(client)[0]
+    llm.queue(prompt("Ela está procurando o celular.", "She is looking for her phone.", ("look for",)))
+    rev = client.post(f"/api/recall/reviews/{item_id}/exercise").json()
+    assert rev["review"]["label_pt"] is None and "look for" not in str(rev)  # sem spoiler
+    llm.queue(evaluation("correct"))
+    r = answer(client, rev["id"], "She's looking for her cellphone")
+    assert r["review"]["label_pt"] == "Uso de “look for” (x)"  # depois da resposta, mostra o que foi revisado

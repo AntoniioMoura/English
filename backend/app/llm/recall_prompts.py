@@ -43,6 +43,10 @@ Rules:
 - sentence_pt must be 100% Portuguese: NEVER put English words in it.
 - Short: 5 to 14 words, A2-B1, unambiguous (make the time clear when the tense matters).
 - reference_en: a natural English translation that uses the structure/word being reviewed correctly.
+- When a word is reviewed, reference_en MUST contain that exact word (or a normal inflected form: play/played).
+  A similar word does NOT count: "their" is not "theirs", "your" is not "yours", "it" is not "its".
+  Write the Portuguese so the natural translation needs that word: theirs -> "A casa é deles." ->
+  "The house is theirs."; yours -> "Esse lugar é seu?" -> "Is this seat yours?"
 - targets: the word being reviewed when it is a vocabulary difficulty; otherwise an empty list.
 - grammar_tags: main grammar topics, from this list: {topics}
 Return JSON only."""

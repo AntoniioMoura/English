@@ -66,7 +66,9 @@ export function RecallCard({ exercise, onChange, onSkip }: Props) {
           🔁 Revisão:{" "}
           {exercise.review.target_type === "sentence"
             ? "esta é uma frase que você errou antes. Ela volta até você acertar."
-            : `frase nova para praticar uma palavra que você errou antes (${exercise.review.label_pt}).`}
+            : exercise.review.label_pt
+              ? `frase nova para praticar uma palavra que você errou antes (${exercise.review.label_pt}).`
+              : "frase nova para praticar uma palavra que você errou antes."}
         </div>
       )}
 
