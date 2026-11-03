@@ -68,8 +68,9 @@ def delete_vocabulary(vocab_id: int, conn: sqlite3.Connection = Depends(get_conn
 # ---------- exercícios ----------
 
 @router.post("/exercises", status_code=201)
-def new_exercise(conn: sqlite3.Connection = Depends(get_conn), llm: LLMClient = Depends(get_llm)):
-    return _llm_call(service.create_new_exercise, conn, llm)
+def new_exercise(conn: sqlite3.Connection = Depends(get_conn), llm: LLMClient = Depends(get_llm),
+                 checker: LLMClient = Depends(get_corrector)):
+    return _llm_call(service.create_new_exercise, conn, llm, checker)
 
 
 @router.get("/exercises/{exercise_id}")
@@ -101,8 +102,9 @@ def due_reviews(conn: sqlite3.Connection = Depends(get_conn)):
 
 
 @router.post("/reviews/{item_id}/exercise", status_code=201)
-def review_exercise(item_id: int, conn: sqlite3.Connection = Depends(get_conn), llm: LLMClient = Depends(get_llm)):
-    return _llm_call(service.create_review_exercise, conn, llm, item_id)
+def review_exercise(item_id: int, conn: sqlite3.Connection = Depends(get_conn), llm: LLMClient = Depends(get_llm),
+                    checker: LLMClient = Depends(get_corrector)):
+    return _llm_call(service.create_review_exercise, conn, llm, item_id, checker)
 
 
 # ---------- progresso e configurações ----------

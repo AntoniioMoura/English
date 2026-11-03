@@ -229,10 +229,15 @@ def alternative_using_targets(alternative: str | None, reference: str, answer: s
     return alternative
 
 
-def natural_version(natural: str | None, reference: str, answer: str, shown: list[str | None]) -> str | None:
+def natural_version(natural: str | None, reference: str, answer: str, shown: list[str | None],
+                    targets: list[str] = ()) -> str | None:
     """Como um nativo diria, sem partir da sua resposta. Avaliações antigas não têm: usa a referência.
-    Some quando repete o que já está na tela."""
+    Precisa usar a palavra do exercício: se a IA fugiu dela e a referência (a forma nativa conferida na
+    criação da frase) a usa, fica a referência. Some quando repete o que já está na tela."""
     candidate = (natural or reference or "").strip()
+    missing = [t for t in targets if not target_demonstrated(t, candidate)]
+    if missing and reference and all(target_demonstrated(t, reference) for t in missing):
+        candidate = reference.strip()
     if not candidate or any(t and same_meaning_form(candidate, t) for t in [answer, *shown]):
         return None
     return candidate

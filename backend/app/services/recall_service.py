@@ -174,7 +174,7 @@ def choose_targets(conn: sqlite3.Connection) -> list[dict]:
 
 # ---------- exercícios ----------
 
-def create_new_exercise(conn: sqlite3.Connection, llm: LLMClient) -> dict:
+def create_new_exercise(conn: sqlite3.Connection, llm: LLMClient, checker: LLMClient | None = None) -> dict:
     if quota(conn)["blocked"]:
         raise RuleViolation("daily_limit", LIMIT_MESSAGE, 429)
     pending = repo.pending_exercise(conn, "new")
@@ -183,13 +183,14 @@ def create_new_exercise(conn: sqlite3.Connection, llm: LLMClient) -> dict:
     entries = choose_targets(conn)
     if not entries:
         raise RuleViolation("no_vocabulary", "Cadastre algumas palavras em “Minhas palavras” para começar.", 422)
-    data = ai.generate_recall_prompt(llm, entries, repo.recent_sentences(conn), frames_repo.topic_ids(conn))
+    data = ai.generate_recall_prompt(llm, entries, repo.recent_sentences(conn), frames_repo.topic_ids(conn), checker)
     with transaction(conn):
         exercise_id = repo.insert_exercise(conn, "new", None, data, llm.model, RECALL_PROMPT_VERSION)
     return get_state(conn, exercise_id)
 
 
-def create_review_exercise(conn: sqlite3.Connection, llm: LLMClient, item_id: int) -> dict:
+def create_review_exercise(conn: sqlite3.Connection, llm: LLMClient, item_id: int,
+                           checker: LLMClient | None = None) -> dict:
     item = repo.get_review_item(conn, item_id)
     if not item:
         raise NotFound(f"Revisão {item_id} não encontrada.")
@@ -213,7 +214,8 @@ def create_review_exercise(conn: sqlite3.Connection, llm: LLMClient, item_id: in
         entry = repo.get_vocab(conn, int(item["target_id"]))
         target_text = entry["english_text"] if entry else item["label_pt"]
         recent = [ex["sentence_pt"] for ex in item["examples"]] + repo.recent_sentences(conn, 10, item_id)
-        data = ai.generate_targeted_review(llm, item, target_text, entry, recent, frames_repo.topic_ids(conn))
+        data = ai.generate_targeted_review(llm, item, target_text, entry, recent, frames_repo.topic_ids(conn),
+                                           checker)
         model = llm.model
     with transaction(conn):
         exercise_id = repo.insert_exercise(conn, "review", item_id, data, model, RECALL_PROMPT_VERSION)
@@ -493,7 +495,8 @@ def _result_view(conn: sqlite3.Connection, exercise: dict, attempt: dict | None,
     result["alternative_en"] = rules.alternative_using_targets(
         result.get("alternative_en"), exercise["reference_en"], attempt["answer_text"], usage_list)
     result["natural_en"] = rules.natural_version(
-        result.get("natural_en"), exercise["reference_en"], attempt["answer_text"], [result.get("corrected_answer")])
+        result.get("natural_en"), exercise["reference_en"], attempt["answer_text"], [result.get("corrected_answer")],
+        [u.english_text for u in usage_list])
     if result["natural_en"] and result["alternative_en"] and rules.same_meaning_form(
             result["natural_en"], result["alternative_en"]):
         result["alternative_en"] = None  # a mesma frase aparece uma vez só, como "Como um nativo diria"

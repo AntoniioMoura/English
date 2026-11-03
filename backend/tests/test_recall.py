@@ -651,3 +651,29 @@ def test_word_review_does_not_reveal_the_word_before_the_answer(client, llm):
     llm.queue(evaluation("correct"))
     r = answer(client, rev["id"], "She's looking for her cellphone")
     assert r["review"]["label_pt"] == "Uso de “look for” (x)"  # depois da resposta, mostra o que foi revisado
+
+
+def test_native_version_keeps_the_word_being_learned(client, llm):
+    add_words(client, "hasn't been")
+    ex = new_ex(client, llm, "O e-mail ainda não foi enviado.", "The email hasn't been sent yet.", ("hasn't been",))
+    # a IA reescreveu sem a palavra do exercício: a referência (forma nativa com a palavra) fica no lugar
+    llm.queue(evaluation("incorrect", [{"category": "grammar", "topic_id": "other", "excerpt": "wasn't sent",
+                                        "correction": "hasn't been sent", "explanation_pt": "x"}],
+                         example="The email hasn't been sent yet.", natural="Nobody has sent the email yet."))
+    r = answer(client, ex["id"], "The mail wasn't sent still")
+    assert r["result"]["natural_en"] == "The email hasn't been sent yet."
+    assert r["result"]["alternative_en"] is None  # a mesma frase aparece uma vez só
+
+
+def test_generation_rejects_a_sentence_natives_would_say_without_the_word(client, llm):
+    add_words(client, "hasn't been")
+    llm.queue(prompt("O livro ainda não foi lido por ninguém.", "The book hasn't been read by anyone yet.",
+                     ("hasn't been",)),
+              prompt("O e-mail ainda não foi enviado.", "The email hasn't been sent yet.", ("hasn't been",)))
+    llm.reference_checks.extend([{"native_en": "Nobody has read the book yet.", "is_correct": True, "corrected_en": ""},
+                                 {"native_en": "The email hasn't been sent yet.", "is_correct": True,
+                                  "corrected_en": ""}])
+    r = client.post("/api/recall/exercises")
+    assert r.status_code == 201, r.text
+    assert r.json()["sentence_pt"] == "O e-mail ainda não foi enviado."
+    assert "native speaker would say this sentence WITHOUT" in llm.calls[-1][1]  # o motivo volta para a IA

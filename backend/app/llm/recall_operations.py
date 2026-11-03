@@ -11,6 +11,9 @@ MAX_GENERATION_ATTEMPTS = 3
 LEAK = "a frase em português continha a palavra em inglês"
 NO_TARGET = "a tradução de referência não usa a palavra-alvo"
 NO_REVIEW_TARGET = "a tradução de referência não usa a palavra revisada"
+NONSENSE = "it does not make sense as a real situation, or the translation was wrong"
+NATIVE_SKIPS_TARGET = ("a native speaker would say this sentence WITHOUT the target word (they would rephrase "
+                       "it). Choose a situation where the most natural English uses the target")
 REASONS_EN = {
     LEAK: "the Portuguese sentence contains the English word (use its Portuguese meaning instead)",
     NO_TARGET: "the English translation does not use the target word",
@@ -38,8 +41,9 @@ def _reveals_answer(result: LLMRecallPrompt, entries: list[dict]) -> str | None:
     return None
 
 
-def _verified(llm: LLMClient, result: LLMRecallPrompt, check) -> LLMRecallPrompt | None:
-    """Confere a tradução de referência (ela aparece depois como 'tradução válida')."""
+def _verified(llm: LLMClient, result: LLMRecallPrompt, check) -> tuple[LLMRecallPrompt | None, str]:
+    """Confere a tradução de referência e se a forma mais natural da frase usa a palavra-alvo.
+    Devolve a frase aprovada (a referência vira a forma nativa) ou None e o motivo em inglês."""
     try:
         verdict = llm.generate(
             prompts.CHECK_REFERENCE_SYSTEM,
@@ -47,17 +51,26 @@ def _verified(llm: LLMClient, result: LLMRecallPrompt, check) -> LLMRecallPrompt
             LLMReferenceCheck,
         )
     except LLMError:
-        return result  # a checagem é uma proteção extra; sem ela, segue a referência gerada
+        return result, ""  # a checagem é uma proteção extra; sem ela, segue a referência gerada
     if not verdict.portuguese_makes_sense:
-        return None  # frase absurda ou forçada: gera outra
+        return None, NONSENSE  # frase absurda ou forçada: gera outra
+    native = verdict.native_en.strip()
+    if native:
+        # "Como um nativo diria" é o que você leva da correção: precisa praticar a palavra.
+        candidate = result.model_copy(update={"reference_en": native})
+        if check(candidate) is not None:
+            return None, NATIVE_SKIPS_TARGET
+        return candidate, ""
     if verdict.is_correct or not verdict.corrected_en.strip():
-        return result
+        return result, ""
     fixed = result.model_copy(update={"reference_en": verdict.corrected_en.strip()})
-    return fixed if check(fixed) is None else None
+    return (fixed, "") if check(fixed) is None else (None, NONSENSE)
 
 
-def _generate_validated(llm: LLMClient, system: str, user: str, recent: list[str], check) -> LLMRecallPrompt:
-    """Gera e valida; uma frase inválida (longa, repetida, sem o alvo) conta como falha e é refeita."""
+def _generate_validated(llm: LLMClient, system: str, user: str, recent: list[str], check,
+                        checker: LLMClient | None = None) -> LLMRecallPrompt:
+    """Gera e valida; uma frase inválida (longa, repetida, sem o alvo) conta como falha e é refeita.
+    `checker` confere a forma nativa: o modelo das correções (o Claude, quando ligado) julga melhor."""
     recent_norm = {normalize_vocab(s) for s in recent}
     last_problem = "frase inválida"
     feedback = ""
@@ -79,17 +92,19 @@ def _generate_validated(llm: LLMClient, system: str, user: str, recent: list[str
             last_problem, reason = "a frase repetia o mesmo trecho", "it repeats the same words twice"
         elif (problem := check(result)) is not None:
             last_problem, reason = problem, REASONS_EN.get(problem, problem)
-        elif (verified := _verified(llm, result, check)) is None:
-            last_problem = "a frase não fazia sentido ou a tradução estava incorreta"
-            reason = "it does not make sense as a real situation, or the translation was wrong"
         else:
-            return verified
+            verified, reason = _verified(checker or llm, result, check)
+            if verified is not None:
+                return verified
+            last_problem = ("um nativo diria a frase sem a palavra-alvo" if reason == NATIVE_SKIPS_TARGET
+                            else "a frase não fazia sentido ou a tradução estava incorreta")
         feedback = (f"\n\nYour previous sentence was REJECTED because {reason}: \"{sentence}\". "
                     "Write a completely different, natural sentence.")
     raise LLMError(f"A IA não conseguiu criar uma frase adequada ({last_problem}). Tente de novo.")
 
 
-def generate_recall_prompt(llm: LLMClient, entries: list[dict], recent: list[str], topic_ids: list[str]) -> dict:
+def generate_recall_prompt(llm: LLMClient, entries: list[dict], recent: list[str], topic_ids: list[str],
+                           checker: LLMClient | None = None) -> dict:
     system = prompts.GENERATE_SYSTEM.replace("{topics}", _topics(topic_ids))
     user = prompts.generate_user_prompt(entries, recent)
 
@@ -98,7 +113,7 @@ def generate_recall_prompt(llm: LLMClient, entries: list[dict], recent: list[str
             return NO_TARGET
         return _reveals_answer(result, entries)
 
-    result = _generate_validated(llm, system, user, recent, check)
+    result = _generate_validated(llm, system, user, recent, check, checker)
     meanings = {normalize_vocab(t.english_text): t.meaning_pt for t in result.targets}
     targets = [
         {
@@ -118,7 +133,8 @@ def generate_recall_prompt(llm: LLMClient, entries: list[dict], recent: list[str
 
 
 def generate_targeted_review(
-    llm: LLMClient, item: dict, target_text: str, entry: dict | None, recent: list[str], topic_ids: list[str]
+    llm: LLMClient, item: dict, target_text: str, entry: dict | None, recent: list[str], topic_ids: list[str],
+    checker: LLMClient | None = None,
 ) -> dict:
     system = prompts.REVIEW_SYSTEM.replace("{topics}", _topics(topic_ids))
     user = prompts.review_user_prompt(item["label_pt"], item["target_type"], target_text, item["examples"], recent)
@@ -128,7 +144,7 @@ def generate_targeted_review(
             return NO_REVIEW_TARGET
         return _reveals_answer(result, [entry] if entry else [])
 
-    result = _generate_validated(llm, system, user, recent, check)
+    result = _generate_validated(llm, system, user, recent, check, checker)
     targets = []
     if entry:
         targets.append({"vocabulary_id": entry["id"], "english_text": entry["english_text"],

@@ -146,8 +146,12 @@ class LLMRecallPrompt(BaseModel):
 
 
 class LLMReferenceCheck(BaseModel):
+    model_config = {"json_schema_extra": lambda schema: schema.setdefault("required", []).insert(0, "native_en")}
+
     # Primeiro o português: descrever a situação antes de julgar ajuda o modelo a notar contradições.
     situation_pt: Short = ""
+    # Como um nativo diria a frase em português, sem olhar a tradução: a palavra-alvo precisa aparecer aqui.
+    native_en: Annotated[str, _truncate(240)] = ""
     portuguese_makes_sense: bool = True
     problem_pt: Short = ""
     is_correct: bool

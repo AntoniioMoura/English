@@ -173,8 +173,10 @@ Especificação em [sentence_recall_especificacao.md](sentence_recall_especifica
 agendador substituível em [domain/scheduler.py](backend/app/domain/scheduler.py).
 
 - **Geração:** a IA cria a frase pt-BR + referência; o backend exige que a referência use a palavra-alvo, que a
-  frase em português não contenha a palavra em inglês e que não repita frases recentes. Uma segunda chamada
-  confere se a referência está correta (ela aparece depois como "tradução válida").
+  frase em português não contenha a palavra em inglês e que não repita frases recentes. Uma segunda chamada,
+  feita pelo modelo das correções (o Claude, quando ligado), escreve como um nativo diria a frase sem olhar a
+  referência: se essa forma natural não usa a palavra, a frase é recusada e refeita; se usa, ela vira a
+  referência. Assim o "Como um nativo diria" do resultado pratica a palavra que você está aprendendo.
 - **Avaliação:** resposta igual à referência (ignorando maiúscula, pontuação e contrações) é correta sem IA.
   Maiúscula, pontuação, contrações e estilo nunca são erro; trecho que não está na resposta é descartado;
   confiança baixa → `needs_review` (não pune). Tradução correta que não usou o alvo = correta, alvo "não usado".

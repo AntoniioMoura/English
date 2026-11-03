@@ -69,6 +69,10 @@ ALSO
 
 Write every *_pt field, highlights and next_tip in Brazilian Portuguese, short and friendly,
 talking directly to the learner as "você" (never "o aluno").
+No grammar jargon without a translation: never write just "objeto", "sujeito", "pronome oblíquo",
+"particípio" etc. Say what each English word means in Portuguese and when to use it, using the
+learner's own sentence ("his = dele: de quem é algo (his birthday). him = ele/a ele depois de verbo ou
+preposição (for him, I gave him)").
 Valid topic_id values: {topics}"""
 
 

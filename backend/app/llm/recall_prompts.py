@@ -12,6 +12,10 @@ Rules:
   Never contradictory, circular or absurd. Bad: "Eu tenho um livro na mesa e ele está em cima do livro."
 - Grammar words (on, have, then, it, their, whatever...) must appear in their most common, natural use.
 - Unambiguous: the Portuguese sentence should lead to an English sentence that uses the target.
+- reference_en must be the MOST natural way a native speaker would say it, and that natural way must use the
+  target. Choose a situation where a native naturally picks the target, not one where they would rephrase.
+  If natives would naturally rephrase the idea with other words (for example an active sentence with
+  "nobody" instead of a passive one), that situation does not practice the target: pick another one.
   Make the time clear when the tense matters (ontem, amanhã, todo dia...).
 - A2-B1 grammar only. No idioms that do not exist in Portuguese.
 - sentence_pt must be 100% Portuguese: NEVER put English words in it (that would give the answer away).
@@ -43,7 +47,9 @@ Rules:
 - sentence_pt must be 100% Portuguese: NEVER put English words in it.
 - Short: 5 to 14 words, A2-B1, unambiguous (make the time clear when the tense matters).
 - reference_en: a natural English translation that uses the structure/word being reviewed correctly.
-- When a word is reviewed, reference_en MUST contain that exact word (or a normal inflected form: play/played).
+- When a word is reviewed, reference_en MUST contain that exact word (or a normal inflected form: play/played),
+  and must be the MOST natural way a native would say the sentence (choose a situation where natives
+  naturally use that word instead of rephrasing).
   A similar word does NOT count: "their" is not "theirs", "your" is not "yours", "it" is not "its".
   Write the Portuguese so the natural translation needs that word: theirs -> "A casa é deles." ->
   "The house is theirs."; yours -> "Esse lugar é seu?" -> "Is this seat yours?"
@@ -76,7 +82,8 @@ EVALUATE_SYSTEM = """You evaluate a translation from Portuguese into English wri
 
 natural_en (write it FIRST): how a native speaker would naturally say the Portuguese sentence in everyday
 English. Translate from the Portuguese ONLY: ignore the learner's answer and the reference wording. Keep the
-meaning and the time, use the target words when they fit naturally, and prefer common, idiomatic phrasing
+meaning and the time, USE the target words (the sentence was chosen to practice them), and prefer common,
+idiomatic phrasing
 ("o que eu disser" -> "what I tell him (to do)"; "o que quiser" -> "whatever he wants").
 
 Decide two separate things:
@@ -100,6 +107,12 @@ error_events: only REAL problems in the learner's answer, each with:
   Good: "gonna = going to: precisa de am/is/are antes (I'm gonna, they're gonna)."
   Good: "Depois de did/didn't o verbo fica na forma base (didn't go, did you see)."
   Bad: "Use will em vez de gonna." (that is not a rule)
+  Good: "his = dele, de quem é algo (his birthday). him = ele/a ele, depois de verbo ou preposição (for him)."
+  Bad: "Possessivo vem antes do substantivo. Him é objeto." (jargon the learner may not understand)
+- explanation_pt and rule_pt: No grammar jargon without a translation: never write just "objeto", "sujeito", "pronome oblíquo",
+  "particípio" etc. Say what each English word means in Portuguese and when to use it, using the
+  learner's own sentence ("his = dele: de quem é algo (his birthday). him = ele/a ele depois de verbo ou
+  preposição (for him, I gave him)").
 - topic_id: the most specific topic from this list (use "other" only if nothing fits):
 {topics}
 NEVER report capitalization, punctuation, or contractions (did not / didn't) - they are always fine.
@@ -119,6 +132,8 @@ Return JSON only."""
 CHECK_REFERENCE_SYSTEM = """You review a translation exercise for a Brazilian learner of English.
 
 0) situation_pt: describe in one short sentence, in Portuguese, the situation the sentence describes.
+   native_en: how a native speaker would MOST naturally say the Portuguese sentence in everyday English.
+   Translate from the Portuguese only, as if you had not seen the English given below.
 1) portuguese_makes_sense: is the Portuguese sentence something a real person would naturally say?
    It must describe a logical, realistic situation. Mark false if it is contradictory, circular or
    absurd ("Eu tenho um livro na mesa e ele está em cima do livro"; "O carro é dos meus irmãos, mas é
